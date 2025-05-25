@@ -5,11 +5,11 @@ description = "Upload an OpenAPI spec, get natural-language summaries of endpoin
 authors = ["Maya Reinart <mayareinart@gmail.com>"]
 license = "GNU GPLv3"
 readme = "README.md"
-packages = [{include = "src"}]
+# packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-fastapi = "^0.115.12"
+fastapi = {extras = ["all"], version = "^0.115.12"}
 uvicorn = {extras = ["standard"], version = "^0.34.2"}
 openai = "^1.82.0"
 pydantic = "^2.11.5"
@@ -23,6 +23,8 @@ mypy = "^1.15.0"
 pre-commit = "^4.2.0"
 python-dotenv = "^1.1.0"
 python-multipart = "^0.0.20"
+celery = "^5.5.2"
+redis = "^6.1.0"
 
 
 [build-system]
