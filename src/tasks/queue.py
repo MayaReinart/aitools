@@ -1,6 +1,6 @@
 from datetime import time
 from loguru import logger
-from ...celery_worker import celery_app
+from celery_worker import celery_app
 
 
 def enqueue_job(job_id: str, file_path: str):
