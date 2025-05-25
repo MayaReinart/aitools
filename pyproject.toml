@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "api-introspection"
+version = "0.1.0"
+description = "Upload an OpenAPI spec, get natural-language summaries of endpoints, test them with mock data, and document issues."
+authors = ["Maya Reinart <mayareinart@gmail.com>"]
+license = "GNU GPLv3"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.115.12"
+uvicorn = {extras = ["standard"], version = "^0.34.2"}
+openai = "^1.82.0"
+pydantic = "^2.11.5"
+loguru = "^0.7.3"
+httpx = "^0.28.1"
+pytest = "^8.3.5"
+pytest-asyncio = "^0.26.0"
+coverage = "^7.8.2"
+ruff = "^0.11.11"
+mypy = "^1.15.0"
+pre-commit = "^4.2.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
