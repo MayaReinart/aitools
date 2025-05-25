@@ -1,8 +1,8 @@
-import shutil
-from uuid import uuid4
+
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pathlib import Path
-
+from ..tasks.queue import summarize_doc
+from celery.result import AsyncResult
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -24,11 +24,14 @@ async def submit_file(file: UploadFile = File(...)):
             detail="Unsupported file type. Please upload a JSON or text file."
         )
     
-    job_id = str(uuid4())
-
-    file_path = UPLOAD_DIR / f"{job_id}_{file.filename}"
-
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # We don't expect the file to be large, so we can read it into memory
+    content = await file.read()
+    job_id = summarize_doc.delay(content)
 
     return {"status": "file uploaded successfully", "job_id": job_id}
+
+
+@router.get("/status/{job_id}")
+async def get_job_status(job_id: str):
+    result = AsyncResult(job_id)
+    return {"status": result.status}
