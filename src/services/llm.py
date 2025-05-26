@@ -1,5 +1,9 @@
 from loguru import logger
 from openai import OpenAI
+from openai.types.chat import (
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
 
 from src.core.config import settings
 
@@ -13,7 +17,9 @@ def summarize_doc(context: str, model: str = "gpt-4o-mini") -> str:
         "answer user questions clearly and concisely. If unsure, say you don't know."
     )
 
-    messages = [
+    messages: list[
+        ChatCompletionSystemMessageParam | ChatCompletionUserMessageParam
+    ] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"{context}"},
     ]
@@ -23,7 +29,8 @@ def summarize_doc(context: str, model: str = "gpt-4o-mini") -> str:
             model=model,
             messages=messages,
         )
-        return response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        return content.strip() if content else ""
     except Exception as e:
         logger.error(f"Error summarizing document: {e}")
         return ""

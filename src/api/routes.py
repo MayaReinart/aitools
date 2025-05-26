@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -55,7 +54,7 @@ async def get_summary(_spec_id: str) -> dict[str, str]:
 async def export_summary(
     _spec_id: str,
     file_format: ExportFormat = ExportFormat.MARKDOWN,
-) -> Annotated[str | bytes, HTMLResponse | FileResponse]:
+) -> HTMLResponse | FileResponse:
     """Export the summary in various formats"""
     # TODO: Implement export functionality
     if file_format == ExportFormat.HTML:
