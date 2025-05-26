@@ -1,4 +1,4 @@
-.PHONY: run celery dev clean
+.PHONY: run celery dev clean pc
 
 run:
 	poetry run uvicorn src.main:app --reload --port 8080
@@ -19,3 +19,8 @@ dev: clean redis
 	trap 'make clean' EXIT; \
 	make run & \
 	make celery
+
+pc:
+	poetry run mypy src
+	-poetry run mypy tests  # No tests yet
+	poetry run pre-commit run --all-files
