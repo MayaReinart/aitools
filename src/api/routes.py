@@ -1,7 +1,6 @@
-
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pathlib import Path
-from ..tasks.queue import summarize_doc
+from ..tasks.tasks import summarize_doc_task
 from celery.result import AsyncResult
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -26,12 +25,24 @@ async def submit_file(file: UploadFile = File(...)):
     
     # We don't expect the file to be large, so we can read it into memory
     content = await file.read()
-    job_id = summarize_doc.delay(content)
+    try:
+        content_str = content.decode('utf-8')
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="File content must be valid UTF-8 text"
+        )
 
-    return {"status": "file uploaded successfully", "job_id": job_id}
+    # Submit the decoded content to Celery
+    job_id = summarize_doc_task.delay(content_str)
+
+    return {"status": "file uploaded successfully", "job_id": str(job_id)}
 
 
-@router.get("/status/{job_id}")
+@router.get("/jobs/{job_id}")
 async def get_job_status(job_id: str):
     result = AsyncResult(job_id)
-    return {"status": result.status}
+    if result.ready():
+        return {"status": result.status, "result": result.result}
+    else:
+        return {"status": result.status}
