@@ -1,15 +1,25 @@
-from pathlib import Path
+from enum import Enum
+from typing import Annotated
 
-from celery.result import AsyncResult
 from fastapi import APIRouter, File, HTTPException, UploadFile
-
-from src.tasks.tasks import summarize_doc_task
+from fastapi.responses import FileResponse, HTMLResponse
 
 router = APIRouter(prefix="/api", tags=["api"])
 
 
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+CONTENT_TYPES = [
+    "application/json",
+    "text/yaml",
+    "application/x-yaml",
+    "text/plain",
+    "text/x-yaml",
+]
+
+
+class ExportFormat(str, Enum):
+    HTML = "html"
+    MARKDOWN = "markdown"
+    DOCX = "docx"
 
 
 @router.get("/health")
@@ -17,38 +27,48 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@router.post("/submit")
-async def submit_file(
-    file: UploadFile = None,
+@router.post("/spec/upload")
+async def upload_spec(
+    file: UploadFile | None = None,
 ) -> dict[str, str]:
+    """Upload an OpenAPI spec (YAML or JSON)"""
     if file is None:
         file = File(...)
-
-    if file.content_type not in ["application/json", "text/plain"]:
+    if file.content_type not in CONTENT_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported file type. Please upload a JSON or text file.",
+            detail="Unsupported file type. Please upload a JSON or YAML file.",
         )
 
-    # We don't expect the file to be large, so we can read it into memory
-    content = await file.read()
-    try:
-        content_str = content.decode("utf-8")
-    except UnicodeDecodeError as err:
-        raise HTTPException(
-            status_code=400,
-            detail="File content must be valid UTF-8 text",
-        ) from err
-
-    # Submit the decoded content to Celery
-    job_id = summarize_doc_task.delay(content_str)
-
-    return {"status": "file uploaded successfully", "job_id": str(job_id)}
+    # TODO: Implement file processing and return a unique ID
+    raise NotImplementedError("Upload endpoint not implemented")
 
 
-@router.get("/jobs/{job_id}")
-async def get_job_status(job_id: str) -> dict[str, str | None]:
-    result = AsyncResult(job_id)
-    if result.ready():
-        return {"status": result.status, "result": result.result}
-    return {"status": result.status}
+@router.get("/spec/{spec_id}/summary")
+async def get_summary(_spec_id: str) -> dict[str, str]:
+    """Retrieve a plain-English summary of the spec"""
+    # TODO: Implement summary retrieval
+    raise NotImplementedError("Summary endpoint not implemented")
+
+
+@router.get("/spec/{spec_id}/export")
+async def export_summary(
+    _spec_id: str,
+    file_format: ExportFormat = ExportFormat.MARKDOWN,
+) -> Annotated[str | bytes, HTMLResponse | FileResponse]:
+    """Export the summary in various formats"""
+    # TODO: Implement export functionality
+    if file_format == ExportFormat.HTML:
+        return HTMLResponse("<h1>API Summary</h1>")
+    if file_format == ExportFormat.MARKDOWN:
+        return FileResponse(
+            path="summary.md",
+            media_type="text/markdown",
+            filename=f"api-summary-{_spec_id}.md",
+        )
+    # DOCX
+    return FileResponse(
+        path="summary.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"api-summary-{_spec_id}.docx",
+    )
