@@ -11,7 +11,7 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@router.post("/submit")
+@router.post("/upload")
 async def submit_file(
     file: UploadFile = None,
 ) -> dict[str, str]:
@@ -40,7 +40,7 @@ async def submit_file(
     return {"status": "file uploaded successfully", "job_id": str(job_id)}
 
 
-@router.get("/jobs/{job_id}")
+@router.get("/status/{job_id}")
 async def get_job_status(job_id: str) -> dict[str, str | None]:
     result = AsyncResult(job_id)
     if result.ready():

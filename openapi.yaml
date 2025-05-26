@@ -1,0 +1,67 @@
+openapi: 3.0.3
+info:
+  title: LLM API Inspector
+  version: 0.1.0
+  description: |
+    Upload OpenAPI specs and query them using natural language.
+    This API parses OpenAPI files and lets you explore or summarize endpoints via LLM.
+
+paths:
+  /upload:
+    post:
+      summary: Upload an OpenAPI spec (YAML or JSON)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Spec uploaded and parsed
+
+  /summary/{job_id}:
+    get:
+      summary: Retrieve a plain-English summary of the spec
+      parameters:
+        - in: path
+          name: job_id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Summary returned
+
+  /query:
+    post:
+      summary: Ask a question about the uploaded API
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                job_id:
+                  type: string
+                question:
+                  type: string
+      responses:
+        "200":
+          description: LLM-generated answer
+
+  /status/{job_id}:
+    get:
+      summary: Check processing status (LLM summarization or spec parsing)
+      parameters:
+        - in: path
+          name: job_id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Status returned
