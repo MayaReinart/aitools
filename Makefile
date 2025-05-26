@@ -1,4 +1,9 @@
-.PHONY: run celery dev clean pc
+.PHONY: all test run celery dev clean pc fix
+
+all: pc
+
+test:
+	poetry run pytest
 
 run:
 	poetry run uvicorn src.main:app --reload --port 8080
@@ -21,6 +26,10 @@ dev: clean redis
 	make celery
 
 pc:
+	poetry run ruff check .
+	poetry run ruff format --check .
 	poetry run mypy src
-	-poetry run mypy tests  # No tests yet
-	poetry run pre-commit run --all-files
+	pre-commit run --all-files
+
+fix:
+	pre-commit run --all-files
