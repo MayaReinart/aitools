@@ -1,11 +1,11 @@
-from datetime import time
-from loguru import logger
+from celery import Task
+
 from celery_worker import celery_app
 from src.services.llm import summarize_doc
 
 
 @celery_app.task(bind=True)
-def summarize_doc_task(self, content: str) -> str:
+def summarize_doc_task(self: Task, content: str) -> str:
     try:
         return summarize_doc(content)
     except Exception as e:

@@ -46,7 +46,7 @@ line-ending = "auto"
 [tool.ruff.lint]
 # Enable pycodestyle (`E`), Pyflakes (`F`), and isort (`I`) codes by default.
 select = ["E", "F", "I", "B", "C", "N", "UP", "ANN", "S", "A", "DTZ", "T20", "RET", "SLF", "SIM", "TID", "ARG", "PTH", "ERA", "PD", "PL", "TRY", "RUF"]
-ignore = []
+ignore = ["ANN101"]  # Ignore missing type annotations for self in methods
 
 # Allow autofix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
