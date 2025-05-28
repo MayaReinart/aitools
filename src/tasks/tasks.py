@@ -10,3 +10,4 @@ def summarize_doc_task(self: Task, content: str) -> str:
         return summarize_doc(content)
     except Exception as e:
         self.retry(exc=e, countdown=5, max_retries=3)
+        raise  # This will never be reached, but makes mypy happy

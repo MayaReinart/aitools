@@ -1,4 +1,5 @@
 import sys
+from typing import cast
 
 from loguru import logger
 from loguru._logger import Logger
@@ -46,4 +47,4 @@ def get_logger() -> Logger:
     Returns:
         The configured loguru logger instance.
     """
-    return logger
+    return cast(Logger, logger)
