@@ -13,10 +13,13 @@ from src.main import app
 client = TestClient(app)
 
 
+SAMPLES_PATH = Path(__file__).parent / "samples"
+
+
 @pytest.fixture
 def sample_spec() -> bytes:
     """Load the sample OpenAPI spec for testing"""
-    spec_path = Path(__file__).parent / "sample.json"
+    spec_path = SAMPLES_PATH / "sample.json"
     return spec_path.read_bytes()
 
 
