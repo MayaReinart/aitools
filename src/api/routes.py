@@ -4,23 +4,20 @@ from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
 
+from src.api.models import validate_spec_file
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
 from src.tasks.tasks import summarize_doc_task
 
 router = APIRouter(prefix="/api", tags=["api"])
 
 
-CONTENT_TYPES = [
-    "application/json",
-    "text/yaml",
-    "application/x-yaml",
-    "text/plain",
-    "text/x-yaml",
-]
-
-
-def _detect_format(content_type: str) -> SpecFormat:
+def _detect_format(content_type: str | None) -> SpecFormat:
     """Detect file format from content type."""
+    if content_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported file type. Please upload a JSON or YAML file.",
+        )
     return SpecFormat.JSON if "json" in content_type else SpecFormat.YAML
 
 
@@ -34,17 +31,8 @@ async def upload_spec(
     file: UploadFile,
 ) -> dict[str, str]:
     """Upload an OpenAPI spec (YAML or JSON)"""
-    if not file:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No file provided",
-        )
-    if file.content_type not in CONTENT_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file type. Please upload a JSON or YAML file.",
-        )
-
+    # Validate and read file
+    validate_spec_file(file)
     content = await file.read()
     spec_content = content.decode("utf-8")
 
