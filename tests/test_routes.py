@@ -106,15 +106,40 @@ class TestSpecSummary:
 
     def test_get_completed_summary(self) -> None:
         """Test getting summary for a completed job"""
+        mock_result = {
+            "spec_info": {
+                "title": "Test API",
+                "version": "1.0.0",
+                "description": "Test description",
+            },
+            "summary": {
+                "overview": "Test overview",
+                "endpoints": [
+                    {
+                        "path": "/test",
+                        "method": "GET",
+                        "analysis": "Test endpoint analysis",
+                    }
+                ],
+            },
+            "endpoints": [
+                {
+                    "path": "/test",
+                    "method": "GET",
+                    "summary": "Test endpoint",
+                }
+            ],
+        }
+
         with patch("src.api.routes.summarize_doc_task") as mock_task:
             mock_task.AsyncResult.return_value = Mock(
-                status="SUCCESS", result={"summary": "Test summary"}
+                status="SUCCESS", result=mock_result
             )
             response = client.get("/api/spec/test-job-id/summary")
             assert response.status_code == status.HTTP_200_OK
             assert response.json() == {
                 "status": "SUCCESS",
-                "result": {"summary": "Test summary"},
+                "result": mock_result,
             }
 
             # Verify summary was saved
