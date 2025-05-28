@@ -133,7 +133,7 @@ class TestSpecExport:
         job_dir.mkdir(parents=True)
         (job_dir / "spec.json").write_text("{}")
 
-        response = client.get("/api/spec/test-job-id/export?file_format=markdown")
+        response = client.get("/api/spec/test-job-id/export?file_format=md")
         assert response.status_code == status.HTTP_200_OK
         assert response.headers["content-type"] == "text/markdown; charset=utf-8"
         assert "api-summary-test-job-id.md" in response.headers["content-disposition"]
