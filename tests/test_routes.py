@@ -1,10 +1,13 @@
+from collections.abc import Generator
 from pathlib import Path
+from shutil import rmtree
 from unittest.mock import Mock, patch
 
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from src.core.storage import JOB_DATA_ROOT
 from src.main import app
 
 client = TestClient(app)
@@ -15,6 +18,14 @@ def sample_spec() -> bytes:
     """Load the sample OpenAPI spec for testing"""
     spec_path = Path(__file__).parent / "sample.json"
     return spec_path.read_bytes()
+
+
+@pytest.fixture(autouse=True)
+def cleanup_job_data() -> Generator[None, None, None]:
+    """Clean up job data after each test."""
+    yield
+    if JOB_DATA_ROOT.exists():
+        rmtree(JOB_DATA_ROOT)
 
 
 def test_health_check() -> None:
@@ -37,6 +48,11 @@ class TestSpecUpload:
             assert response.json() == {"job_id": "test-job-id"}
             mock_task.delay.assert_called_once()
 
+            # Verify file was saved
+            spec_path = JOB_DATA_ROOT / "test-job-id" / "spec.json"
+            assert spec_path.exists()
+            assert spec_path.read_bytes() == sample_spec
+
     def test_upload_valid_yaml(self, sample_spec: bytes) -> None:
         """Test uploading with YAML content type"""
         with patch("src.api.routes.summarize_doc_task") as mock_task:
@@ -47,6 +63,11 @@ class TestSpecUpload:
             )
             assert response.status_code == status.HTTP_200_OK
             assert response.json() == {"job_id": "test-job-id"}
+
+            # Verify file was saved
+            spec_path = JOB_DATA_ROOT / "test-job-id" / "spec.yaml"
+            assert spec_path.exists()
+            assert spec_path.read_bytes() == sample_spec
 
     def test_upload_invalid_content_type(self, sample_spec: bytes) -> None:
         """Test uploading file with invalid content type"""
@@ -93,36 +114,57 @@ class TestSpecSummary:
                 "result": {"summary": "Test summary"},
             }
 
+            # Verify summary was saved
+            summary_path = JOB_DATA_ROOT / "test-job-id" / "summary.json"
+            assert summary_path.exists()
+
 
 class TestSpecExport:
-    @pytest.fixture(autouse=True)
-    def setup_results_dir(self) -> None:
-        """Create temporary results directory for tests"""
-        results_dir = Path("results/test-job-id")
-        results_dir.mkdir(parents=True, exist_ok=True)
-        yield
-        # Cleanup after tests
-        if results_dir.exists():
-            for f in results_dir.glob("*"):
-                f.unlink()
-            results_dir.rmdir()
+    def test_export_nonexistent_job(self) -> None:
+        """Test exporting a non-existent job"""
+        response = client.get("/api/spec/nonexistent-id/export")
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "Job not found" in response.json()["detail"]
 
     def test_export_markdown(self) -> None:
         """Test exporting summary as Markdown"""
+        # Create a mock spec file to make the job exist
+        job_dir = JOB_DATA_ROOT / "test-job-id"
+        job_dir.mkdir(parents=True)
+        (job_dir / "spec.json").write_text("{}")
+
         response = client.get("/api/spec/test-job-id/export?file_format=markdown")
         assert response.status_code == status.HTTP_200_OK
         assert response.headers["content-type"] == "text/markdown; charset=utf-8"
         assert "api-summary-test-job-id.md" in response.headers["content-disposition"]
 
+        # Verify export was saved
+        export_path = job_dir / "summary.md"
+        assert export_path.exists()
+
     def test_export_html(self) -> None:
         """Test exporting summary as HTML"""
+        # Create a mock spec file to make the job exist
+        job_dir = JOB_DATA_ROOT / "test-job-id"
+        job_dir.mkdir(parents=True)
+        (job_dir / "spec.json").write_text("{}")
+
         response = client.get("/api/spec/test-job-id/export?file_format=html")
         assert response.status_code == status.HTTP_200_OK
         assert response.headers["content-type"] == "text/html; charset=utf-8"
         assert "<h1>API Summary</h1>" in response.text
 
+        # Verify export was saved
+        export_path = job_dir / "summary.html"
+        assert export_path.exists()
+
     def test_export_docx(self) -> None:
         """Test exporting summary as DOCX"""
+        # Create a mock spec file to make the job exist
+        job_dir = JOB_DATA_ROOT / "test-job-id"
+        job_dir.mkdir(parents=True)
+        (job_dir / "spec.json").write_text("{}")
+
         response = client.get("/api/spec/test-job-id/export?file_format=docx")
         assert response.status_code == status.HTTP_200_OK
         assert (
@@ -130,3 +172,7 @@ class TestSpecExport:
             in response.headers["content-type"]
         )
         assert "api-summary-test-job-id.docx" in response.headers["content-disposition"]
+
+        # Verify export was saved
+        export_path = job_dir / "summary.docx"
+        assert export_path.exists()

@@ -1,9 +1,9 @@
-from enum import Enum
-from pathlib import Path
+from typing import cast
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from src.core.storage import ExportFormat, JobStorage, SpecFormat
 from src.tasks.tasks import summarize_doc_task
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -18,10 +18,9 @@ CONTENT_TYPES = [
 ]
 
 
-class ExportFormat(str, Enum):
-    HTML = "html"
-    MARKDOWN = "markdown"
-    DOCX = "docx"
+def _detect_format(content_type: str) -> SpecFormat:
+    """Detect file format from content type."""
+    return SpecFormat.JSON if "json" in content_type else SpecFormat.YAML
 
 
 @router.get("/health")
@@ -46,14 +45,23 @@ async def upload_spec(
         )
 
     content = await file.read()
-    job_id = summarize_doc_task.delay(content.decode("utf-8"))
+    spec_content = content.decode("utf-8")
 
-    return {"job_id": str(job_id)}
+    # Start the processing task
+    job_id = str(summarize_doc_task.delay(spec_content))
+
+    # Save the uploaded spec
+    storage = JobStorage(job_id)
+    format_ = _detect_format(file.content_type)
+    storage.save_spec(spec_content, format_)
+
+    return {"job_id": job_id}
 
 
 @router.get("/spec/{job_id}/summary", response_model=None)
 async def get_summary(job_id: str) -> JSONResponse:
     """Retrieve a plain-English summary of the spec"""
+    storage = JobStorage(job_id)
 
     result = summarize_doc_task.AsyncResult(job_id)
     if result.status == "PENDING":
@@ -66,6 +74,11 @@ async def get_summary(job_id: str) -> JSONResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Job failed",
         )
+
+    # Save the summary if we haven't already
+    if result.status == "SUCCESS" and not storage.get_summary_path():
+        storage.save_summary(cast(dict, result.result))
+
     return JSONResponse(content={"status": result.status, "result": result.result})
 
 
@@ -75,31 +88,31 @@ async def export_summary(
     file_format: ExportFormat = ExportFormat.MARKDOWN,
 ) -> Response:
     """Export the summary in various formats"""
-    # Ensure the results directory exists
-    results_dir = Path("results") / job_id
-    results_dir.mkdir(parents=True, exist_ok=True)
+    storage = JobStorage(job_id)
+
+    # Check if the job exists
+    if not storage.get_spec_path():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
 
     if file_format == ExportFormat.HTML:
-        return HTMLResponse("<h1>API Summary</h1>")
+        path = storage.ensure_export_exists(ExportFormat.HTML)
+        return HTMLResponse(path.read_text())
 
     if file_format == ExportFormat.MARKDOWN:
-        file_path = results_dir / "summary.md"
-        # Create an empty file if it doesn't exist (temporary)
-        if not file_path.exists():
-            file_path.write_text("# API Summary\n\nTo be implemented")
+        path = storage.ensure_export_exists(ExportFormat.MARKDOWN)
         return FileResponse(
-            path=str(file_path),
+            path=str(path),
             media_type="text/markdown; charset=utf-8",
             filename=f"api-summary-{job_id}.md",
         )
 
     if file_format == ExportFormat.DOCX:
-        file_path = results_dir / "summary.docx"
-        # Create an empty file if it doesn't exist (temporary)
-        if not file_path.exists():
-            file_path.write_bytes(b"")  # Empty DOCX for now
+        path = storage.ensure_export_exists(ExportFormat.DOCX)
         return FileResponse(
-            path=str(file_path),
+            path=str(path),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=f"api-summary-{job_id}.docx",
         )
