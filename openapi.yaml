@@ -7,9 +7,28 @@ info:
     This API parses OpenAPI files and lets you explore or summarize endpoints via LLM.
 
 paths:
+  /api/health:
+    get:
+      summary: Check API health status
+      description: Returns health status of the API and its dependencies
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /spec/upload:
     post:
       summary: Upload an OpenAPI spec (YAML or JSON)
+      description: Upload and parse an OpenAPI specification file for analysis
       requestBody:
         required: true
         content:
@@ -20,47 +39,69 @@ paths:
                 file:
                   type: string
                   format: binary
+                  description: OpenAPI specification file (YAML or JSON)
       responses:
         "200":
-          description: Spec uploaded and parsed
+          description: Spec uploaded and parsed successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: string
-                    description: The unique identifier for the uploaded spec
+                $ref: "#/components/schemas/UploadResponse"
+        "400":
+          description: Invalid file format or content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /spec/{id}/summary:
     get:
       summary: Retrieve a JSON summary of the spec
+      description: Get an LLM-generated analysis of the API specification
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: string
+          description: The unique identifier of the uploaded spec
       responses:
         "200":
-          description: Summary returned
+          description: Summary returned successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  summary:
-                    type: string
+                $ref: "#/components/schemas/SummaryResponse"
+        "404":
+          description: Spec not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many requests to LLM service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /spec/{id}/export:
     get:
       summary: Download the summary in various formats
+      description: Export the API analysis in different documentation formats
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: string
+          description: The unique identifier of the uploaded spec
         - in: query
           name: format
           required: true
@@ -68,6 +109,7 @@ paths:
             type: string
             enum: [html, markdown, docx]
             default: markdown
+          description: The desired export format
       responses:
         "200":
           description: Summary exported in requested format
@@ -82,3 +124,141 @@ paths:
               schema:
                 type: string
                 format: binary
+        "404":
+          description: Spec not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /spec/{id}/logs:
+    get:
+      summary: Retrieve processing logs
+      description: Get logs related to spec processing and analysis
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The unique identifier of the uploaded spec
+      responses:
+        "200":
+          description: Logs retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogsResponse"
+        "404":
+          description: Spec not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: object
+          properties:
+            celery:
+              type: string
+              enum: [healthy, unhealthy]
+            redis:
+              type: string
+              enum: [healthy, unhealthy]
+            openai:
+              type: string
+              enum: [healthy, unhealthy]
+
+    UploadResponse:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: The unique identifier for the uploaded spec
+        message:
+          type: string
+          description: A success message
+
+    SummaryResponse:
+      type: object
+      required:
+        - overview
+        - endpoints
+      properties:
+        overview:
+          type: string
+          description: General overview of the API
+        endpoints:
+          type: array
+          items:
+            type: object
+            required:
+              - path
+              - method
+              - analysis
+            properties:
+              path:
+                type: string
+              method:
+                type: string
+              analysis:
+                type: string
+
+    LogsResponse:
+      type: object
+      required:
+        - id
+        - logs
+      properties:
+        id:
+          type: string
+          description: The spec identifier
+        logs:
+          type: array
+          items:
+            type: object
+            required:
+              - timestamp
+              - level
+              - message
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              level:
+                type: string
+                enum: [INFO, WARNING, ERROR]
+              message:
+                type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code or identifier
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error details if available
