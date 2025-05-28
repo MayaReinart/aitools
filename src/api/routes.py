@@ -2,6 +2,7 @@ from typing import cast
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from loguru import logger
 
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
 from src.tasks.tasks import summarize_doc_task
@@ -77,6 +78,7 @@ async def get_summary(job_id: str) -> JSONResponse:
 
     # Save the summary if we haven't already
     if result.status == "SUCCESS" and not storage.get_summary_path():
+        logger.info(f"Saving {job_id} summary")
         storage.save_summary(cast(dict, result.result))
 
     return JSONResponse(content={"status": result.status, "result": result.result})
@@ -97,12 +99,12 @@ async def export_summary(
             detail="Job not found",
         )
 
+    path = storage.ensure_export_exists(file_format)
+
     if file_format == ExportFormat.HTML:
-        path = storage.ensure_export_exists(ExportFormat.HTML)
         return HTMLResponse(path.read_text())
 
     if file_format == ExportFormat.MARKDOWN:
-        path = storage.ensure_export_exists(ExportFormat.MARKDOWN)
         return FileResponse(
             path=str(path),
             media_type="text/markdown; charset=utf-8",
@@ -110,7 +112,6 @@ async def export_summary(
         )
 
     if file_format == ExportFormat.DOCX:
-        path = storage.ensure_export_exists(ExportFormat.DOCX)
         return FileResponse(
             path=str(path),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
