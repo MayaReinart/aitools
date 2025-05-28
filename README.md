@@ -1,94 +1,245 @@
 # API Introspection
 
-## Project Architecture
+A service that analyzes OpenAPI specifications and generates natural language summaries and documentation using AI.
 
-### Overview
+## Features
 
-The Async Summarizer SaaS API is designed as a modular, scalable, and testable backend system for document summarization. It uses modern Python tooling and best practices to mimic production-level architecture in a focused, portfolio-grade scope.
+- Upload and parse OpenAPI specifications (JSON/YAML)
+- Generate natural language summaries of API endpoints
+- Export summaries in multiple formats (Markdown, HTML, DOCX)
+- Asynchronous processing with job status tracking
+- Structured logging and error handling
 
-### Tech Stack
+## Tech Stack
 
-| Layer             | Tooling                                   | Why it was chosen                                                        |
-| ----------------- | ----------------------------------------- | ------------------------------------------------------------------------ |
-| API framework     | `FastAPI`                                 | Fast, modern, async-native Python web framework with Pydantic validation |
-| Background jobs   | `Celery` or `FastAPI.BackgroundTasks`     | Offload summarization work to non-blocking queues                        |
-| Auth & security   | `FastAPI`, `python-jose`, `passlib` (JWT) | Demonstrate token-based authentication                                   |
-| Logging           | `Loguru` with custom handlers             | Simple, powerful logging with flexible formatting and redirection        |
-| Config management | `python-dotenv` + env vars                | Decouple config from code, keep secrets out of Git                       |
-| Queue/broker      | `Redis` or `RabbitMQ`                     | Reliable job queuing and retry infrastructure                            |
-| Deployment target | `AWS Lambda` or `ECS`, optionally Docker  | Show familiarity with AWS and containerization                           |
-| Storage           | `S3`                                      | Store original files and logs; simulate production file management       |
-| AI summarization  | `LlamaIndex`, `LangChain`, or OpenAI API  | Modular summarization engine with optional fallback and benchmarking     |
+| Component          | Technology                               | Purpose                                                               |
+|-------------------|------------------------------------------|-----------------------------------------------------------------------|
+| Framework         | FastAPI                                  | Modern async web framework with automatic OpenAPI/Swagger docs         |
+| Task Queue        | Celery + Redis                          | Background processing for API analysis and summary generation          |
+| Configuration     | pydantic-settings                       | Type-safe configuration management with environment variables          |
+| Logging           | Loguru                                  | Structured logging with customizable formatting                        |
+| Testing           | pytest + pytest-asyncio                  | Async-aware testing with comprehensive fixtures                        |
+| Code Quality      | Ruff, MyPy, pre-commit                  | Linting, type checking, and automated code quality checks             |
+| AI Integration    | OpenAI API                              | Natural language processing for API analysis                           |
 
-### Structure
+## Project Structure
 
 ```
 api_introspection/
-├── main.py                # Entry point for FastAPI
-├── config.py              # Loads .env and central config
-├── logging_config.py      # Loguru setup with structured logs
-├── api/
-│   ├── routes.py          # API endpoints
-│   └── models.py          # Pydantic schemas
-├── services/
-│   └── summarizer.py      # LLM integration logic
-├── tasks/
-│   └── queue.py           # Background job handler (Celery or other)
-└── utils/                 # Helpers, validation, S3, etc.
+├── src/
+│   ├── api/
+│   │   ├── routes.py          # FastAPI route definitions
+│   │   └── models.py          # Request/response Pydantic models
+│   ├── core/
+│   │   ├── config.py          # Environment and app configuration
+│   │   ├── storage.py         # Job data storage management
+│   │   └── logging_config.py  # Loguru setup and configuration
+│   ├── services/
+│   │   └── openai.py          # OpenAI API integration
+│   └── tasks/
+│       └── tasks.py           # Celery task definitions
+├── tests/
+│   ├── test_routes.py         # API endpoint tests
+│   └── conftest.py            # pytest fixtures and configuration
+├── celery_worker.py           # Celery worker configuration
+├── pyproject.toml            # Project dependencies and tools config
+└── DEBUGGING.md              # Development and debugging guide
 ```
 
-### Key Design Decisions
+## API Documentation
 
-#### Async First
+### Endpoints
 
-Most modern APIs benefit from async support — especially when using I/O-heavy tasks like file processing, LLM API calls, and database or storage access.
+#### 1. Health Check
 
-- FastAPI + async routes
+```http
+GET /api/health
+```
 
-- Background task queue to avoid blocking main event loop
+Response:
+```json
+{
+    "status": "healthy"
+}
+```
 
-#### Queue-Based Architecture
+#### 2. Upload OpenAPI Specification
 
-Summarization tasks can take several seconds or more. Rather than tying up client requests, jobs are enqueued and processed in the background.
+```http
+POST /api/spec/upload
+```
 
-- Enables retry logic, parallelism, and performance monitoring
+**Request:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| file | File (multipart/form-data) | Yes | OpenAPI spec file (JSON/YAML) |
 
-- Client can poll job status or get notified via webhook/email (optional)
+**Supported Content Types:**
+- application/json
+- text/yaml
+- application/x-yaml
+- text/plain
+- text/x-yaml
 
-#### Structured Logging with Loguru
+**Response:**
+```json
+{
+    "job_id": "string"  // UUID for tracking the analysis job
+}
+```
 
-Used to:
+**Error Responses:**
+- 400: Invalid file type or no file provided
+- 500: Server error during file processing
 
-- Capture FastAPI/uvicorn logs uniformly
+#### 3. Get Summary
 
-- Add context (e.g., request IDs, timestamps)
+```http
+GET /api/spec/{job_id}/summary
+```
 
-- Redirect to stdout, file, or S3
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| job_id | string (path) | Yes | Job ID from upload response |
 
-This matches production setups where logs are monitored or piped to observability stacks.
+**Response States:**
+1. Processing:
+```json
+{
+    "detail": "Job is still processing"
+}
+```
+Status Code: 202 Accepted
 
-#### Environment-Based Configuration
+2. Completed:
+```json
+{
+    "status": "SUCCESS",
+    "result": {
+        // Summary content structure
+        "endpoints": [...],
+        "schemas": [...],
+        "overview": "string"
+    }
+}
+```
+Status Code: 200 OK
 
-.env file loaded with python-dotenv, supporting .env.template for safe sharing.
+3. Failed:
+```json
+{
+    "detail": "Job failed"
+}
+```
+Status Code: 500 Internal Server Error
 
-This makes the project easy to configure, deploy, and containerize — without hardcoding secrets.
+#### 4. Export Summary
 
-#### Extensibility
+```http
+GET /api/spec/{job_id}/export
+```
 
-The services/summarizer.py layer abstracts the summarization engine (e.g., OpenAI, LlamaIndex). This makes it easy to swap models or prompt strategies during testing or benchmarking.
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| job_id | string (path) | Yes | Job ID from upload response |
+| file_format | string (query) | No | Export format: "md" (default), "html", or "docx" |
 
-### Possible Enhancements
+**Response:**
+- Format: Markdown (default)
+  - Content-Type: text/markdown
+  - Filename: api-summary-{job_id}.md
+- Format: HTML
+  - Content-Type: text/html
+  - Direct HTML content
+- Format: DOCX
+  - Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+  - Filename: api-summary-{job_id}.docx
 
-- Add retry + failure handling in Celery
+**Error Responses:**
+- 404: Job not found
+- 400: Unsupported file format
+- 500: Export generation error
 
-- Add job dashboard or Slack/email notifications
+## Setup
 
-- Track metrics (request latency, job duration) with Prometheus/Grafana
+1. Clone the repository
+2. Install dependencies:
+```bash
+poetry install
+```
 
-- Auto-cleanup of old logs/files in S3
+3. Create `.env` file with required variables:
+```env
+OPENAI_API_KEY=your_api_key
+ENV=development
+LOG_LEVEL=DEBUG
+REDIS_URL=redis://localhost:6379
+```
 
-- API rate-limiting or quota (e.g. per user or token)
+4. Start Redis:
+```bash
+docker run -d -p 6379:6379 redis
+```
 
-## Usage
+5. Start Celery worker:
+```bash
+poetry run celery -A celery_worker worker --loglevel=info
+```
 
-TODO
+6. Start the API server:
+```bash
+poetry run uvicorn src.main:app --reload
+```
+
+## Development
+
+The project includes a Makefile with several useful commands to help with development:
+
+### Code Quality
+
+```bash
+make pc           # Run all code quality checks (ruff, mypy, pre-commit)
+make fix         # Run pre-commit hooks to fix code style issues
+```
+
+### Development Server
+
+```bash
+make run         # Start the FastAPI development server with hot reload
+make celery      # Start the Celery worker
+make redis       # Start Redis server in daemon mode
+make dev         # Start complete development environment (API + Celery + Redis)
+```
+
+### Cleanup
+
+```bash
+make clean       # Stop all development processes (API, Celery, Redis)
+```
+
+### All Commands
+
+| Command | Description |
+|---------|-------------|
+| `make pc` | Run all code quality checks (ruff linting, formatting, mypy type checking, pre-commit hooks) |
+| `make fix` | Run pre-commit hooks to automatically fix code style issues |
+| `make test` | Run the test suite |
+| `make run` | Start the FastAPI development server on port 8080 with hot reload |
+| `make celery` | Start the Celery worker for background task processing |
+| `make redis` | Start Redis server in daemon mode |
+| `make dev` | Start the complete development environment (cleans up existing processes, starts Redis, API, and Celery) |
+| `make clean` | Stop all development processes (API server, Celery worker, Redis) |
+
+## Testing
+
+Run the test suite:
+```bash
+poetry run pytest
+```
+
+With coverage:
+```bash
+poetry run pytest --cov=src
+```
