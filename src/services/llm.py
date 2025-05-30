@@ -63,7 +63,7 @@ def analyze_spec(spec: ParsedSpec) -> SpecAnalysis:
     return SpecAnalysis(overview=overview, endpoints=endpoint_analyses)
 
 
-def _get_completion(prompt: str, model: str = "gpt-3.5-turbo") -> str:
+def _get_completion(prompt: str, model: str = "gpt-4o-mini") -> str:
     """
     Get a completion from OpenAI.
 
