@@ -1,13 +1,14 @@
 """OpenAPI specification parser and validator."""
 
-from typing import Any, TypedDict
+from typing import Any
 
 import yaml
 from fastapi import HTTPException, status
 from loguru import logger
+from pydantic import BaseModel
 
 
-class ParsedEndpoint(TypedDict):
+class ParsedEndpoint(BaseModel):
     """Structured representation of an API endpoint."""
 
     method: str
@@ -19,7 +20,7 @@ class ParsedEndpoint(TypedDict):
     responses: dict[str, Any]
 
 
-class ParsedSpec(TypedDict):
+class ParsedSpec(BaseModel):
     """Structured representation of an OpenAPI spec."""
 
     title: str
@@ -103,7 +104,10 @@ def parse_openapi_spec(content: str) -> ParsedSpec:
                     description=operation.get("description"),
                     parameters=operation.get("parameters", []),
                     request_body=operation.get("requestBody"),
-                    responses=operation.get("responses", {}),
+                    responses={
+                        str(code): details
+                        for code, details in operation.get("responses", {}).items()
+                    },
                 )
             )
 

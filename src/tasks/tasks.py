@@ -4,7 +4,7 @@ from celery import Task
 from loguru import logger
 
 from celery_worker import celery_app
-from src.services.llm import summarize_doc
+from src.services.llm import analyze_spec
 from src.services.parser import parse_openapi_spec
 
 
@@ -29,19 +29,18 @@ def summarize_doc_task(self: Task, content: str) -> dict:
 
         # Generate summaries
         logger.info("Generating API summary")
-        summary = summarize_doc(str(parsed_spec))
-
-        return {
-            "spec_info": {
-                "title": parsed_spec["title"],
-                "version": parsed_spec["version"],
-                "description": parsed_spec["description"],
-            },
-            "summary": summary,
-            "endpoints": parsed_spec["endpoints"],
-        }
-
+        summary = analyze_spec(parsed_spec)
     except Exception as e:
         logger.error(f"Error processing spec: {e}")
         self.retry(exc=e, countdown=5, max_retries=3)
         raise  # This will never be reached, but makes mypy happy
+    else:
+        return {
+            "spec_info": {
+                "title": parsed_spec.title,
+                "version": parsed_spec.version,
+                "description": parsed_spec.description,
+            },
+            "summary": summary,
+            "endpoints": parsed_spec.endpoints,
+        }

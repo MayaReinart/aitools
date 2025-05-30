@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException, status
 
-from src.services.parser import parse_openapi_spec
+from src.services.parser import ParsedSpec, parse_openapi_spec
 
 SAMPLES_PATH = Path(__file__).parent / "samples"
 
@@ -18,17 +18,17 @@ class TestOpenAPIParser:
         with Path.open(SAMPLES_PATH / "sample.yaml", "r") as f:
             spec = f.read()
 
-        result = parse_openapi_spec(spec)
-        assert result["title"] == "Test API"
-        assert result["version"] == "1.0.0"
-        assert result["description"] == "A test API"
-        assert len(result["endpoints"]) == 1
+        result: ParsedSpec = parse_openapi_spec(spec)
+        assert result.title == "Test API"
+        assert result.version == "1.0.0"
+        assert result.description == "A test API"
+        assert len(result.endpoints) == 1
 
-        endpoint = result["endpoints"][0]
-        assert endpoint["method"] == "GET"
-        assert endpoint["path"] == "/test"
-        assert endpoint["summary"] == "Test endpoint"
-        assert len(endpoint["parameters"]) == 1
+        endpoint = result.endpoints[0]
+        assert endpoint.method == "GET"
+        assert endpoint.path == "/test"
+        assert endpoint.summary == "Test endpoint"
+        assert len(endpoint.parameters) == 1
 
     def test_invalid_yaml(self) -> None:
         """Test parsing invalid YAML."""
