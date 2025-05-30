@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
-from src.services.llm import analyze_spec
+from src.services.llm import SpecAnalysis, analyze_spec
 from src.services.parser import parse_openapi_spec
 
 SAMPLES_PATH = Path(__file__).parent / "samples"
@@ -23,21 +24,19 @@ def test_analyze_petstore_spec() -> None:
     analysis = analyze_spec(spec)
 
     # Verify the structure of the response
-    assert isinstance(analysis, dict)
-    assert "overview" in analysis
-    assert isinstance(analysis["overview"], str)
+    assert isinstance(analysis, SpecAnalysis)
+    assert analysis.overview
+    logger.debug(analysis.overview)
     # Should have meaningful content
-    assert len(analysis["overview"]) > COMPLETION_MIN_LENGTH
+    assert len(analysis.overview) > COMPLETION_MIN_LENGTH
 
-    assert "endpoints" in analysis
-    assert isinstance(analysis["endpoints"], list)
-    assert len(analysis["endpoints"]) > 0
+    assert analysis.endpoints
+    assert len(analysis.endpoints) > 0
 
     # Check the first endpoint
-    endpoint = analysis["endpoints"][0]
-    assert "path" in endpoint
-    assert "method" in endpoint
-    assert "analysis" in endpoint
-    assert isinstance(endpoint["analysis"], str)
+    endpoint = analysis.endpoints[0]
+    assert endpoint.path
+    assert endpoint.method
+    assert endpoint.analysis
     # Should have meaningful content
-    assert len(endpoint["analysis"]) > COMPLETION_MIN_LENGTH
+    assert len(endpoint.analysis) > COMPLETION_MIN_LENGTH
