@@ -5,8 +5,9 @@ from typing import Any
 import yaml
 from fastapi import HTTPException, status
 from loguru import logger
-from prance import BaseParser, ValidationError  # type: ignore[import-untyped]
+from prance import BaseParser  # type: ignore[import-untyped]
 from pydantic import BaseModel
+from referencing.exceptions import Unresolvable
 
 
 class ParsedEndpoint(BaseModel):
@@ -80,7 +81,7 @@ def parse_openapi_spec(content: str) -> ParsedSpec:
     try:
         parser = BaseParser(spec_string=content, backend="openapi-spec-validator")
         validated_spec = parser.specification
-    except ValidationError as exc:
+    except (Unresolvable, ValueError) as exc:
         logger.error(f"Unexpected error during OpenAPI validation: {exc}")
         # Fall back to using the PyYAML parsed spec
         logger.warning("Falling back to basic YAML parsed spec")
@@ -154,10 +155,15 @@ def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
 
 def _is_valid_operation(operation: dict[str, Any]) -> bool:
     """Check if an operation is valid according to OpenAPI spec."""
-    return (
-        isinstance(operation, dict)
-        and "responses" in operation  # Responses are required in OpenAPI
-    )
+    if not isinstance(operation, dict):
+        return False
+
+    # Check if responses exist and are properly structured
+    responses = operation.get("responses", {})
+    if not isinstance(responses, dict):
+        return False
+
+    return all(isinstance(response, dict) for response in responses.values())
 
 
 def _is_valid_method(method: str) -> bool:
