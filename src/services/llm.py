@@ -30,7 +30,7 @@ class SpecAnalysis(BaseModel):
     endpoints: list[EndpointAnalysis]
 
 
-def analyze_spec(spec: ParsedSpec) -> SpecAnalysis:
+def get_llm_spec_analysis(spec: ParsedSpec) -> SpecAnalysis:
     """
     Analyze an OpenAPI specification using LLM.
 

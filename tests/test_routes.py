@@ -1,3 +1,5 @@
+"""Tests for API routes."""
+
 from collections.abc import Generator
 from pathlib import Path
 from shutil import rmtree
@@ -32,17 +34,23 @@ def cleanup_job_data() -> Generator[None, None, None]:
 
 
 def test_health_check() -> None:
-    """Test the health check endpoint"""
+    """Test health check endpoint."""
     response = client.get("/api/health")
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {"status": "healthy"}
 
 
 class TestSpecUpload:
+    """Tests for spec upload endpoint."""
+
     def test_upload_valid_json(self, sample_spec: bytes) -> None:
         """Test uploading a valid JSON OpenAPI spec"""
-        with patch("src.api.routes.summarize_doc_task") as mock_task:
-            mock_task.delay.return_value = "test-job-id"
+        with (
+            patch("src.api.routes.uuid4") as mock_uuid,
+            patch("src.api.routes.summarize_doc_task") as mock_task,
+        ):
+            mock_uuid.return_value = "test-job-id"
+
             response = client.post(
                 "/api/spec/upload",
                 files={"file": ("test.json", sample_spec, "application/json")},
@@ -58,14 +66,19 @@ class TestSpecUpload:
 
     def test_upload_valid_yaml(self, sample_spec: bytes) -> None:
         """Test uploading with YAML content type"""
-        with patch("src.api.routes.summarize_doc_task") as mock_task:
-            mock_task.delay.return_value = "test-job-id"
+        with (
+            patch("src.api.routes.uuid4") as mock_uuid,
+            patch("src.api.routes.summarize_doc_task") as mock_task,
+        ):
+            mock_uuid.return_value = "test-job-id"
+
             response = client.post(
                 "/api/spec/upload",
                 files={"file": ("test.yaml", sample_spec, "text/yaml")},
             )
             assert response.status_code == status.HTTP_200_OK
             assert response.json() == {"job_id": "test-job-id"}
+            mock_task.delay.assert_called_once()
 
             # Verify file was saved
             spec_path = JOB_DATA_ROOT / "test-job-id" / "spec.yaml"
