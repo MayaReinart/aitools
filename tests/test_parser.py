@@ -66,3 +66,95 @@ class TestOpenAPIParser:
             parse_openapi_spec("")
         assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
         assert "Spec must be a YAML/JSON object" in exc.value.detail
+
+    def test_invalid_operation_object(self) -> None:
+        """Test handling of invalid operation objects."""
+        spec = """
+            openapi: 3.0.0
+            info:
+                title: Test API
+                version: 1.0.0
+            paths:
+                /test:
+                    get: not_an_object
+        """
+        result = parse_openapi_spec(spec)
+        assert len(result.endpoints) == 0
+
+    def test_malformed_responses(self) -> None:
+        """Test handling of malformed response objects."""
+        spec = """
+            openapi: 3.0.0
+            info:
+                title: Test API
+                version: 1.0.0
+            paths:
+                /test:
+                    get:
+                        responses:
+                            '200': not_an_object
+        """
+        result = parse_openapi_spec(spec)
+        assert len(result.endpoints) == 0
+
+    def test_component_references(self) -> None:
+        """Test parsing of component references."""
+        spec = """
+            openapi: 3.0.0
+            info:
+                title: Test API
+                version: 1.0.0
+            paths:
+                /test:
+                    get:
+                        responses:
+                            '200':
+                                $ref: '#/components/schemas/TestResponse'
+            components:
+                schemas:
+                    TestResponse:
+                        type: object
+                        properties:
+                            message:
+                                type: string
+        """
+        result = parse_openapi_spec(spec)
+        assert result.components
+        assert "schemas" in result.components
+        assert "TestResponse" in result.components["schemas"]
+
+    @pytest.mark.parametrize(
+        "method,is_valid",
+        [
+            ("GET", True),
+            ("POST", True),
+            ("PUT", True),
+            ("DELETE", True),
+            ("PATCH", True),
+            ("HEAD", True),
+            ("OPTIONS", True),
+            ("TRACE", False),
+            ("CONNECT", False),
+            ("INVALID", False),
+        ],
+    )
+    def test_valid_methods(self, method: str, is_valid: bool) -> None:
+        """Test validation of HTTP methods."""
+        spec = f"""
+            openapi: 3.0.0
+            info:
+                title: Test API
+                version: 1.0.0
+            paths:
+                /test:
+                    {method.lower()}:
+                        responses:
+                            '200':
+                                description: OK
+        """
+        result = parse_openapi_spec(spec)
+        if is_valid:
+            assert len(result.endpoints) == 1
+            assert result.endpoints[0].method == method.upper()
+        else:
+            assert len(result.endpoints) == 0
