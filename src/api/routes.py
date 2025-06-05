@@ -1,4 +1,5 @@
 from typing import cast
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -36,13 +37,18 @@ async def upload_spec(
     content = await file.read()
     spec_content = content.decode("utf-8")
 
-    # Start the processing task
-    job_id = str(summarize_doc_task.delay(spec_content))
+    # Generate a unique job ID
+    job_id = str(uuid4())
+
+    # Initialize storage
+    storage = JobStorage(job_id)
 
     # Save the uploaded spec
-    storage = JobStorage(job_id)
     format_ = _detect_format(file.content_type)
     storage.save_spec(spec_content, format_)
+
+    # Start the processing task
+    summarize_doc_task.delay(spec_content, job_id, storage)
 
     return {"job_id": job_id}
 
