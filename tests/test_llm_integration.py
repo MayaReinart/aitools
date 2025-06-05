@@ -9,7 +9,7 @@ from openai import APIError
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.completion_usage import CompletionUsage
 
-from src.services.llm import LLMConfig, SpecAnalysis, analyze_spec
+from src.services.llm import LLMConfig, SpecAnalysis, get_llm_spec_analysis
 from src.services.parser import parse_openapi_spec
 
 SAMPLES_PATH = Path(__file__).parent / "samples"
@@ -50,7 +50,7 @@ def test_analyze_petstore_spec() -> None:
     spec = parse_openapi_spec((SAMPLES_PATH / "petstore.yaml").read_text())
 
     # Analyze the spec using LLM
-    analysis = analyze_spec(spec)
+    analysis = get_llm_spec_analysis(spec)
 
     # Verify the structure of the response
     assert isinstance(analysis, SpecAnalysis)
