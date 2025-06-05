@@ -30,6 +30,14 @@ class SpecAnalysis(BaseModel):
     endpoints: list[EndpointAnalysis]
 
 
+class LLMConfig(BaseModel):
+    """Configuration for the LLM."""
+
+    model: str = "gpt-4o-mini"
+    temperature: float = 0.3
+    max_tokens: int = 2000
+
+
 def get_llm_spec_analysis(spec: ParsedSpec) -> SpecAnalysis:
     """
     Analyze an OpenAPI specification using LLM.
@@ -44,14 +52,14 @@ def get_llm_spec_analysis(spec: ParsedSpec) -> SpecAnalysis:
 
     # Generate API overview
     logger.info("Generating API overview")
-    overview = _get_completion(spec_analysis["overview"])
+    overview = _get_completion(spec_analysis["overview"], config)
 
     # Analyze each endpoint
     logger.info("Analyzing endpoints")
     endpoint_analyses: list[EndpointAnalysis] = []
     for endpoint in spec_analysis["endpoints"]:
         logger.info(f"Analyzing endpoint: {endpoint['method']} {endpoint['path']}")
-        endpoint_analysis = _get_completion(endpoint["analysis"])
+        endpoint_analysis = _get_completion(endpoint["analysis"], config)
         endpoint_analyses.append(
             EndpointAnalysis(
                 path=endpoint["path"],
@@ -63,7 +71,7 @@ def get_llm_spec_analysis(spec: ParsedSpec) -> SpecAnalysis:
     return SpecAnalysis(overview=overview, endpoints=endpoint_analyses)
 
 
-def _get_completion(prompt: str, model: str = "gpt-4o-mini") -> str:
+def _get_completion(prompt: str, config: LLMConfig | None = None) -> str:
     """
     Get a completion from OpenAI.
 
@@ -86,11 +94,15 @@ def _get_completion(prompt: str, model: str = "gpt-4o-mini") -> str:
         {"role": "user", "content": prompt},
     ]
 
+    if config is None:
+        config = LLMConfig()
+
     try:
         response = client.chat.completions.create(
-            model=model,
+            model=config.model,
             messages=messages,
-            temperature=0.3,  # Lower temperature for more focused responses
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
         )
         content = response.choices[0].message.content
         return content.strip() if content else ""
