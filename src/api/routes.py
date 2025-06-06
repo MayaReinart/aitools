@@ -1,4 +1,3 @@
-from typing import cast
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
@@ -6,10 +5,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
 
 from src.api.models import validate_spec_file
+from src.core.models import TaskStateInfo
+from src.core.state import StateStore
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
 from src.tasks.tasks import summarize_doc_task
 
 router = APIRouter(prefix="/api", tags=["api"])
+state_store = StateStore()
 
 
 def _detect_format(content_type: str | None) -> SpecFormat:
@@ -58,24 +60,57 @@ async def get_summary(job_id: str) -> JSONResponse:
     """Retrieve a plain-English summary of the spec"""
     storage = JobStorage(job_id)
 
-    result = summarize_doc_task.AsyncResult(job_id)
-    if result.status == "PENDING":
-        raise HTTPException(
+    # Check task state first
+    state = state_store.get_state(job_id)
+    if not state:
+        # Fall back to Celery state if not in our store
+        result = summarize_doc_task.AsyncResult(job_id)
+        if result.status == "PENDING":
+            raise HTTPException(
+                status_code=status.HTTP_202_ACCEPTED,
+                detail="Job is still processing",
+            )
+        if result.status == "FAILURE":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Job failed",
+            )
+        return JSONResponse(content={"status": result.status, "result": result.result})
+
+    # Return state from our store
+    if state.state.value in ["PENDING", "STARTED", "PROGRESS"]:
+        return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
-            detail="Job is still processing",
+            content={
+                "status": state.state.value,
+                "progress": state.progress[-1].model_dump() if state.progress else None,
+            },
         )
-    if result.status == "FAILURE":
+
+    if state.state == "FAILURE":
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Job failed",
+            detail=state.error or "Job failed",
         )
 
     # Save the summary if we haven't already
-    if result.status == "SUCCESS" and not storage.get_summary_path():
+    if not storage.get_summary_path() and state.result:
         logger.info(f"Saving {job_id} summary")
-        storage.save_summary(cast(dict, result.result))
+        storage.save_summary(state.result)
 
-    return JSONResponse(content={"status": result.status, "result": result.result})
+    return JSONResponse(content={"status": state.state.value, "result": state.result})
+
+
+@router.get("/spec/{job_id}/state", response_model=TaskStateInfo)
+async def get_state(job_id: str) -> TaskStateInfo:
+    """Get detailed task state information."""
+    state = state_store.get_state(job_id)
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
+    return state
 
 
 @router.get("/spec/{job_id}/export", response_model=None)

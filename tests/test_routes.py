@@ -1,6 +1,7 @@
 """Tests for API routes."""
 
 from collections.abc import Generator
+from datetime import datetime, timezone
 from pathlib import Path
 from shutil import rmtree
 from unittest.mock import Mock, patch
@@ -9,6 +10,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from src.core.models import TaskProgress, TaskState, TaskStateInfo
 from src.core.storage import JOB_DATA_ROOT
 from src.main import app
 
@@ -23,6 +25,13 @@ def sample_spec() -> bytes:
     """Load the sample OpenAPI spec for testing"""
     spec_path = SAMPLES_PATH / "sample.json"
     return spec_path.read_bytes()
+
+
+@pytest.fixture
+def mock_state_store() -> Generator[Mock, None, None]:
+    """Mock the state store."""
+    with patch("src.api.routes.state_store") as mock:
+        yield mock
 
 
 @pytest.fixture(autouse=True)
@@ -101,25 +110,52 @@ class TestSpecUpload:
 
 
 class TestSpecSummary:
-    def test_get_pending_summary(self) -> None:
-        """Test getting summary for a pending job"""
-        with patch("src.api.routes.summarize_doc_task") as mock_task:
-            mock_task.AsyncResult.return_value = Mock(status="PENDING")
-            response = client.get("/api/spec/test-job-id/summary")
-            assert response.status_code == status.HTTP_202_ACCEPTED
-            assert "processing" in response.json()["detail"]
+    """Tests for summary endpoint."""
 
-    def test_get_failed_summary(self) -> None:
-        """Test getting summary for a failed job"""
-        with patch("src.api.routes.summarize_doc_task") as mock_task:
-            mock_task.AsyncResult.return_value = Mock(status="FAILURE")
-            response = client.get("/api/spec/test-job-id/summary")
-            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-            assert "failed" in response.json()["detail"]
+    def test_get_pending_summary_from_state(self, mock_state_store: Mock) -> None:
+        """Test getting summary for a pending job from state store."""
+        progress = 50.0
 
-    def test_get_completed_summary(self) -> None:
-        """Test getting summary for a completed job"""
-        mock_result = {
+        state = TaskStateInfo(
+            job_id="test-job-id",
+            state=TaskState.PROGRESS,
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc),
+            progress=[
+                TaskProgress(
+                    stage="parsing",
+                    progress=progress,
+                    message="Parsing spec",
+                    timestamp=datetime.now(tz=timezone.utc),
+                )
+            ],
+        )
+        mock_state_store.get_state.return_value = state
+
+        response = client.get("/api/spec/test-job-id/summary")
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        assert response.json()["status"] == "PROGRESS"
+        assert response.json()["progress"]["stage"] == "parsing"
+        assert response.json()["progress"]["progress"] == progress
+
+    def test_get_failed_summary_from_state(self, mock_state_store: Mock) -> None:
+        """Test getting summary for a failed job from state store."""
+        state = TaskStateInfo(
+            job_id="test-job-id",
+            state=TaskState.FAILURE,
+            error="Test error",
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc),
+        )
+        mock_state_store.get_state.return_value = state
+
+        response = client.get("/api/spec/test-job-id/summary")
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert "Test error" in response.json()["detail"]
+
+    def test_get_completed_summary_from_state(self, mock_state_store: Mock) -> None:
+        """Test getting summary for a completed job from state store."""
+        result = {
             "spec_info": {
                 "title": "Test API",
                 "version": "1.0.0",
@@ -144,23 +180,61 @@ class TestSpecSummary:
             ],
         }
 
-        with patch("src.api.routes.summarize_doc_task") as mock_task:
-            mock_task.AsyncResult.return_value = Mock(
-                status="SUCCESS", result=mock_result
-            )
-            response = client.get("/api/spec/test-job-id/summary")
-            assert response.status_code == status.HTTP_200_OK
-            assert response.json() == {
-                "status": "SUCCESS",
-                "result": mock_result,
-            }
+        state = TaskStateInfo(
+            job_id="test-job-id",
+            state=TaskState.SUCCESS,
+            result=result,
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc),
+        )
+        mock_state_store.get_state.return_value = state
 
-            # Verify summary was saved
-            summary_path = JOB_DATA_ROOT / "test-job-id" / "summary.json"
-            assert summary_path.exists()
+        response = client.get("/api/spec/test-job-id/summary")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["status"] == "SUCCESS"
+        assert response.json()["result"] == result
+
+    def test_get_pending_summary_fallback(self, mock_state_store: Mock) -> None:
+        """Test falling back to Celery state when no state store entry exists."""
+        mock_state_store.get_state.return_value = None
+
+        with patch("src.api.routes.summarize_doc_task") as mock_task:
+            mock_task.AsyncResult.return_value = Mock(status="PENDING")
+            response = client.get("/api/spec/test-job-id/summary")
+            assert response.status_code == status.HTTP_202_ACCEPTED
+            assert "processing" in response.json()["detail"]
+
+
+class TestSpecState:
+    """Tests for state endpoint."""
+
+    def test_get_state_not_found(self, mock_state_store: Mock) -> None:
+        """Test getting state for non-existent job."""
+        mock_state_store.get_state.return_value = None
+        response = client.get("/api/spec/test-job-id/state")
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_get_state_success(self, mock_state_store: Mock) -> None:
+        """Test getting state for existing job."""
+        state = TaskStateInfo(
+            job_id="test-job-id",
+            state=TaskState.SUCCESS,
+            result={"test": "result"},
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc),
+        )
+        mock_state_store.get_state.return_value = state
+
+        response = client.get("/api/spec/test-job-id/state")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["job_id"] == "test-job-id"
+        assert response.json()["state"] == "SUCCESS"
+        assert response.json()["result"] == {"test": "result"}
 
 
 class TestSpecExport:
+    """Tests for export endpoint."""
+
     def test_export_nonexistent_job(self) -> None:
         """Test exporting a non-existent job"""
         response = client.get("/api/spec/nonexistent-id/export")

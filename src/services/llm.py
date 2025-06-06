@@ -38,7 +38,9 @@ class LLMConfig(BaseModel):
     max_tokens: int = 2000
 
 
-def get_llm_spec_analysis(spec: ParsedSpec) -> SpecAnalysis:
+def get_llm_spec_analysis(
+    spec: ParsedSpec, config: LLMConfig | None = None
+) -> SpecAnalysis:
     """
     Analyze an OpenAPI specification using LLM.
 

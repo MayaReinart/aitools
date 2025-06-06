@@ -5,50 +5,150 @@ from typing import Any
 import yaml
 from fastapi import HTTPException, status
 from loguru import logger
-from prance import BaseParser  # type: ignore[import-untyped]
-from pydantic import BaseModel
+from prance import ResolvingParser  # type: ignore[import-untyped]
+from prance.util.resolver import (  # type: ignore[import-untyped]
+    RESOLVE_FILES,
+)
+from pydantic import ConfigDict, Field
 from referencing.exceptions import Unresolvable
+
+from src.core.models import BaseModel
+
+
+class OpenAPISchema(BaseModel):
+    """OpenAPI schema object model."""
+
+    type: str | None = None
+    format: str | None = None
+    description: str | None = None
+    items: dict[str, Any] | None = None
+    properties: dict[str, Any] | None = None
+    required: list[str] | None = None
+    enum: list[Any] | None = None
+    default: Any | None = None
+
+
+class ParsedParameter(BaseModel):
+    """Parsed parameter information."""
+
+    name: str
+    location: str
+    required: bool = False
+    api_schema: OpenAPISchema | None = None
+    description: str | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class ParsedRequestBody(BaseModel):
+    """Parsed request body information."""
+
+    required: bool = False
+    content_type: str
+    api_schema: OpenAPISchema | None = None
+    description: str | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class ParsedResponse(BaseModel):
+    """Parsed response information."""
+
+    status_code: str
+    description: str | None = None
+    content_type: str | None = None
+    api_schema: OpenAPISchema | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ParsedEndpoint(BaseModel):
-    """Structured representation of an API endpoint."""
+    """Parsed endpoint information."""
 
     method: str
     path: str
     summary: str | None = None
     description: str | None = None
-    parameters: list[dict[str, Any]] = []
-    request_body: dict[str, Any] | None = None
-    responses: dict[str, Any]
+    parameters: list[ParsedParameter] = Field(default_factory=list)
+    request_body: ParsedRequestBody | None = None
+    responses: dict[str, ParsedResponse] = Field(default_factory=dict)
 
     @classmethod
     def from_operation(
-        cls: type["ParsedEndpoint"], method: str, path: str, operation: dict[str, Any]
+        cls: type["ParsedEndpoint"], method: str, path: str, operation: dict
     ) -> "ParsedEndpoint":
-        """Create ParsedEndpoint from OpenAPI operation object.
+        """Create an endpoint from an OpenAPI operation object."""
+        parameters = []
+        for param in operation.get("parameters", []):
+            if not isinstance(param, dict):
+                continue
+            parameters.append(
+                ParsedParameter(
+                    name=param.get("name", ""),
+                    location=param.get("in", "query"),
+                    required=param.get("required", False),
+                    api_schema=OpenAPISchema(**param.get("schema", {})),
+                    description=param.get("description"),
+                )
+            )
 
-        Args:
-            method: HTTP method
-            path: URL path
-            operation: OpenAPI operation object
-        """
-        responses = {
-            str(code): details
-            for code, details in operation.get("responses", {}).items()
-        }
+        # Parse request body
+        request_body = None
+        if "requestBody" in operation:
+            body = operation["requestBody"]
+            if not isinstance(body, dict):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid request body at {path} {method}: {body}",
+                )
 
-        # Handle parameters separately to ensure correct typing
-        parameters = operation.get("parameters", [])
-        if not isinstance(parameters, list):
-            parameters = []
+            content_type, api_schema = parse_schema(body["content"])
+            request_body = ParsedRequestBody(
+                required=body.get("required", False),
+                content_type=content_type,
+                api_schema=api_schema,
+                description=body.get("description"),
+            )
+
+        # Parse responses
+        responses = {}
+        for status_code, response_info in operation.get("responses", {}).items():
+            if not isinstance(response_info, dict):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid response at {path} {method}: {response_info}",
+                )
+
+            content_type, api_schema = parse_schema(response_info.get("content", {}))
+            responses[status_code] = ParsedResponse(
+                status_code=status_code,
+                description=response_info.get("description"),
+                content_type=content_type if content_type else None,
+                api_schema=api_schema,
+            )
 
         return cls(
             method=method.upper(),
             path=path,
+            summary=operation.get("summary"),
+            description=operation.get("description"),
             parameters=parameters,
-            **{k: operation.get(k) for k in ["summary", "description", "requestBody"]},
+            request_body=request_body,
             responses=responses,
         )
+
+
+def parse_schema(content: dict[str, Any]) -> tuple[str, OpenAPISchema | None]:
+    """Parse a schema from a content dictionary."""
+    content_type, schema_info = next(iter(content.items()), ("", {}))
+    if not isinstance(schema_info, dict):
+        return content_type, None
+
+    api_schema = (
+        OpenAPISchema(**schema_info["schema"]) if "schema" in schema_info else None
+    )
+
+    return content_type, api_schema
 
 
 class ParsedSpec(BaseModel):
@@ -74,20 +174,21 @@ def parse_openapi_spec(content: str) -> ParsedSpec:
     Raises:
         HTTPException: If the spec is invalid or missing required fields
     """
-    # First step: Parse YAML and validate basic structure
+    # First step: Parse YAML/JSON and validate basic structure
     spec = _parse_yaml(content)
 
-    # Second step: Full OpenAPI validation with Prance
+    # Second step: Validate OpenAPI and resolve references
     try:
-        parser = BaseParser(spec_string=content, backend="openapi-spec-validator")
+        parser = ResolvingParser(
+            spec_string=content,
+            resolve_types=RESOLVE_FILES,
+            strict=False,  # Don't be too strict with validation
+        )
         validated_spec = parser.specification
     except (Unresolvable, ValueError) as exc:
-        logger.error(f"Unexpected error during OpenAPI validation: {exc}")
-        # Fall back to using the PyYAML parsed spec
-        logger.warning("Falling back to basic YAML parsed spec")
+        logger.error(f"OpenAPI validation error: {exc}")
         validated_spec = spec
 
-    # Third step: Extract endpoints using the validated spec
     return _parse_endpoints(validated_spec)
 
 
@@ -131,6 +232,7 @@ def _parse_yaml(content: str) -> dict[str, Any]:
 
 
 def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
+    """Parse endpoints from an OpenAPI specification."""
     endpoints: list[ParsedEndpoint] = []
     for path, path_item in validated_spec.get("paths", {}).items():
         if not isinstance(path_item, dict):
@@ -138,7 +240,7 @@ def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
             continue
 
         for method, operation in path_item.items():
-            if not _is_valid_operation(operation) or not _is_valid_method(method):
+            if not isinstance(operation, dict) or not _is_valid_method(method):
                 logger.debug(f"Skipping invalid operation at {path} {method}")
                 continue
 
@@ -153,19 +255,6 @@ def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
     )
 
 
-def _is_valid_operation(operation: dict[str, Any]) -> bool:
-    """Check if an operation is valid according to OpenAPI spec."""
-    if not isinstance(operation, dict):
-        return False
-
-    # Check if responses exist and are properly structured
-    responses = operation.get("responses", {})
-    if not isinstance(responses, dict):
-        return False
-
-    return all(isinstance(response, dict) for response in responses.values())
-
-
 def _is_valid_method(method: str) -> bool:
     """Check if a method is a valid HTTP method."""
     return method.upper() in {
@@ -176,4 +265,5 @@ def _is_valid_method(method: str) -> bool:
         "PATCH",
         "HEAD",
         "OPTIONS",
+        "TRACE",
     }

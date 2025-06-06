@@ -84,7 +84,7 @@ def test_rate_limit_handling() -> None:
             message="Rate limit exceeded",
         )
         with pytest.raises(APIError) as exc:
-            analyze_spec(spec)
+            get_llm_spec_analysis(spec)
         assert "Rate limit exceeded" in str(exc.value)
 
 
@@ -97,7 +97,7 @@ def test_custom_model_config() -> None:
 
     with patch("src.services.llm.client") as mock_client:
         mock_client.chat.completions.create.return_value = mock_response
-        result = analyze_spec(spec, config=config)
+        result = get_llm_spec_analysis(spec, config=config)
 
         # Verify the config was used
         mock_client.chat.completions.create.assert_called_with(
@@ -146,7 +146,7 @@ def test_token_limit_handling() -> None:
 
     with patch("src.services.llm.client") as mock_client:
         mock_client.chat.completions.create.side_effect = mock_responses
-        result = analyze_spec(spec)
+        result = get_llm_spec_analysis(spec)
 
         assert isinstance(result, SpecAnalysis)
         assert result.overview == "API Overview content"
@@ -171,5 +171,5 @@ def test_error_handling(error_type: type[Exception], error_msg: str) -> None:
     with patch("src.services.llm.client") as mock_client:
         mock_client.chat.completions.create.side_effect = error_type(error_msg)
         with pytest.raises(error_type) as exc:
-            analyze_spec(spec)
+            get_llm_spec_analysis(spec)
         assert error_msg in str(exc.value)
