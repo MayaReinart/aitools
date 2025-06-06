@@ -58,8 +58,8 @@ class TaskStateInfo(BaseModel):
         """Serialize the model, converting datetime to ISO format."""
         return {
             "job_id": self.job_id,
-            "state": self.state,
-            "progress": self.progress,
+            "state": self.state.value,
+            "progress": [p.serialize_model() for p in self.progress],
             "result": self.result,
             "error": self.error,
             "created_at": self.created_at.isoformat(),

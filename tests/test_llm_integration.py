@@ -129,6 +129,13 @@ def test_token_limit_handling() -> None:
                     responses:
                         '200':
                             description: Success
+                            content:
+                                application/json:
+                                    schema:
+                                        type: object
+                                        properties:
+                                            message:
+                                                type: string
         """
 
     spec = parse_openapi_spec(large_spec)

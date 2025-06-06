@@ -78,8 +78,10 @@ class TestOpenAPIParser:
                 /test:
                     get: not_an_object
         """
-        result = parse_openapi_spec(spec)
-        assert len(result.endpoints) == 0
+        with pytest.raises(HTTPException) as exc:
+            parse_openapi_spec(spec)
+        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Invalid operation at /test get" in exc.value.detail
 
     def test_malformed_responses(self) -> None:
         """Test handling of malformed response objects."""
@@ -94,8 +96,10 @@ class TestOpenAPIParser:
                         responses:
                             '200': not_an_object
         """
-        result = parse_openapi_spec(spec)
-        assert len(result.endpoints) == 0
+        with pytest.raises(HTTPException) as exc:
+            parse_openapi_spec(spec)
+        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Invalid response at /test get" in exc.value.detail
 
     def test_component_references(self) -> None:
         """Test parsing of component references."""

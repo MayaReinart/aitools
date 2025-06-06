@@ -5,12 +5,9 @@ from typing import Any
 import yaml
 from fastapi import HTTPException, status
 from loguru import logger
+from openapi_spec_validator import validate
 from prance import ResolvingParser  # type: ignore[import-untyped]
-from prance.util.resolver import (  # type: ignore[import-untyped]
-    RESOLVE_FILES,
-)
 from pydantic import ConfigDict, Field
-from referencing.exceptions import Unresolvable
 
 from src.core.models import BaseModel
 
@@ -120,8 +117,8 @@ class ParsedEndpoint(BaseModel):
                 )
 
             content_type, api_schema = parse_schema(response_info.get("content", {}))
-            responses[status_code] = ParsedResponse(
-                status_code=status_code,
+            responses[str(status_code)] = ParsedResponse(
+                status_code=str(status_code),
                 description=response_info.get("description"),
                 content_type=content_type if content_type else None,
                 api_schema=api_schema,
@@ -140,15 +137,21 @@ class ParsedEndpoint(BaseModel):
 
 def parse_schema(content: dict[str, Any]) -> tuple[str, OpenAPISchema | None]:
     """Parse a schema from a content dictionary."""
+    if not content:
+        return "", None
+
     content_type, schema_info = next(iter(content.items()), ("", {}))
     if not isinstance(schema_info, dict):
         return content_type, None
 
-    api_schema = (
-        OpenAPISchema(**schema_info["schema"]) if "schema" in schema_info else None
-    )
+    if "schema" not in schema_info:
+        return content_type, None
 
-    return content_type, api_schema
+    schema_data = schema_info["schema"]
+    if not isinstance(schema_data, dict):
+        return content_type, None
+
+    return content_type, OpenAPISchema(**schema_data)
 
 
 class ParsedSpec(BaseModel):
@@ -174,22 +177,51 @@ def parse_openapi_spec(content: str) -> ParsedSpec:
     Raises:
         HTTPException: If the spec is invalid or missing required fields
     """
-    # First step: Parse YAML/JSON and validate basic structure
-    spec = _parse_yaml(content)
-
-    # Second step: Validate OpenAPI and resolve references
+    # First validate basic YAML/JSON structure
     try:
-        parser = ResolvingParser(
-            spec_string=content,
-            resolve_types=RESOLVE_FILES,
-            strict=False,  # Don't be too strict with validation
-        )
-        validated_spec = parser.specification
-    except (Unresolvable, ValueError) as exc:
-        logger.error(f"OpenAPI validation error: {exc}")
-        validated_spec = spec
+        if isinstance(content, dict | list):
+            content = yaml.dump(content)
 
-    return _parse_endpoints(validated_spec)
+        # First validate basic structure and required fields
+        spec = _parse_yaml(content)
+
+        # Resolve references first
+        try:
+            parser = ResolvingParser(
+                spec_string=content,
+                backend="openapi-spec-validator",
+                strict=False,
+            )
+            validated_spec = parser.specification
+        except Exception as resolve_error:
+            # Log the resolution error but continue with basic spec
+            logger.warning(
+                f"Reference resolution failed, using basic spec: {resolve_error}"
+            )
+            validated_spec = spec
+
+        # Then validate the resolved spec
+        try:
+            # Convert to string for validation if needed
+            if isinstance(validated_spec, dict):
+                spec_str = yaml.dump(validated_spec)
+            else:
+                spec_str = validated_spec
+            validate(yaml.safe_load(spec_str))
+        except Exception as validation_error:
+            # Don't fail on validation errors, just log them
+            logger.warning(f"OpenAPI validation failed: {validation_error}")
+
+        return _parse_endpoints(validated_spec)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to parse OpenAPI spec")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to parse OpenAPI spec: {exc}",
+        ) from exc
 
 
 def _parse_yaml(content: str) -> dict[str, Any]:
@@ -236,12 +268,18 @@ def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
     endpoints: list[ParsedEndpoint] = []
     for path, path_item in validated_spec.get("paths", {}).items():
         if not isinstance(path_item, dict):
-            logger.warning(f"Skipping invalid path item at {path}: not a dict")
-            continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid path item at {path}: not a dict",
+            )
 
         for method, operation in path_item.items():
-            if not isinstance(operation, dict) or not _is_valid_method(method):
-                logger.debug(f"Skipping invalid operation at {path} {method}")
+            if not isinstance(operation, dict):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid operation at {path} {method}: not a dict",
+                )
+            if not _is_valid_method(method):
                 continue
 
             endpoints.append(ParsedEndpoint.from_operation(method, path, operation))
@@ -265,5 +303,4 @@ def _is_valid_method(method: str) -> bool:
         "PATCH",
         "HEAD",
         "OPTIONS",
-        "TRACE",
     }
