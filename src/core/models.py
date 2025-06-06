@@ -7,6 +7,31 @@ from typing import Any
 from pydantic import BaseModel, Field, model_serializer
 
 
+class DateTimeSerializerMixin(BaseModel):
+    """Mixin to handle datetime ISO format serialization."""
+
+    @model_serializer
+    def serialize_model(self) -> dict[str, Any]:
+        """Serialize the model, converting all datetime fields to ISO format."""
+        data: dict[str, Any] = {}
+        for field_name, field_value in self:
+            if isinstance(field_value, datetime):
+                data[field_name] = field_value.isoformat()
+            elif (
+                isinstance(field_value, list)
+                and field_value
+                and isinstance(field_value[0], BaseModel)
+            ):
+                data[field_name] = [
+                    dict(item.model_dump(mode="json")) for item in field_value
+                ]
+            elif isinstance(field_value, Enum):
+                data[field_name] = field_value.value
+            elif field_value is not None:
+                data[field_name] = field_value
+        return data
+
+
 class TaskState(str, Enum):
     """Task execution states."""
 
@@ -18,7 +43,7 @@ class TaskState(str, Enum):
     RETRY = "RETRY"
 
 
-class TaskProgress(BaseModel):
+class TaskProgress(DateTimeSerializerMixin):
     """Task progress information."""
 
     stage: str = Field(..., description="Current processing stage")
@@ -26,18 +51,8 @@ class TaskProgress(BaseModel):
     message: str = Field(..., description="Progress message")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
-    @model_serializer
-    def serialize_model(self) -> dict[str, Any]:
-        """Serialize the model, converting datetime to ISO format."""
-        return {
-            "stage": self.stage,
-            "progress": self.progress,
-            "message": self.message,
-            "timestamp": self.timestamp.isoformat(),
-        }
 
-
-class TaskStateInfo(BaseModel):
+class TaskStateInfo(DateTimeSerializerMixin):
     """Complete task state information."""
 
     job_id: str = Field(..., description="Unique job identifier")
@@ -52,17 +67,3 @@ class TaskStateInfo(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     retries: int = Field(default=0, description="Number of retries attempted")
-
-    @model_serializer
-    def serialize_model(self) -> dict[str, Any]:
-        """Serialize the model, converting datetime to ISO format."""
-        return {
-            "job_id": self.job_id,
-            "state": self.state.value,
-            "progress": [p.serialize_model() for p in self.progress],
-            "result": self.result,
-            "error": self.error,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-            "retries": self.retries,
-        }

@@ -57,7 +57,7 @@ class StateStore:
             self.redis.setex(
                 key,
                 int(self.ttl.total_seconds()),  # Redis expects seconds as int
-                json.dumps(state.serialize_model()),
+                json.dumps(state.model_dump()),
             )
         except Exception as e:
             logger.error(f"Error saving state for {state.job_id}: {e}")
