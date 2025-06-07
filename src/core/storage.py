@@ -1,11 +1,14 @@
 """Job data storage utilities."""
 
+import json
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
 from loguru import logger
 
-JOB_DATA_ROOT = Path("job_data")
+JOB_DATA_ROOT = Path("results")
+JOB_DATA_ROOT.mkdir(exist_ok=True)
 
 
 class JobArtifact(str, Enum):
@@ -15,6 +18,7 @@ class JobArtifact(str, Enum):
     PARSED_SPEC = "parsed_spec"
     SUMMARY = "summary"
     EXPORT = "export"
+    LOG = "log"
 
 
 class SpecFormat(str, Enum):
@@ -32,6 +36,15 @@ class ExportFormat(str, Enum):
     DOCX = "docx"
 
 
+def _get_and_log_path(path: Path, job_id: str, artifact: JobArtifact) -> Path | None:
+    """Check if a path exists and log the result."""
+    if path.exists():
+        logger.debug(f"Found {job_id} {artifact} at {path}")
+        return path
+    logger.debug(f"No {job_id} {artifact} found at {path}")
+    return None
+
+
 class JobStorage:
     """Handles storage and retrieval of job-related data."""
 
@@ -40,17 +53,24 @@ class JobStorage:
         self.job_dir = JOB_DATA_ROOT / job_id
         self.job_dir.mkdir(parents=True, exist_ok=True)
 
+        # Initialize log file
+        self.log_file = self.job_dir / "execution.log"
+        if not self.log_file.exists():
+            self.log_file.touch()
+
     def save_spec(self, content: str, format_: SpecFormat) -> Path:
         """Save the uploaded spec file."""
         spec_path = self.job_dir / f"spec.{format_}"
         spec_path.write_text(content)
+        self.log_event("Saved spec file")
         logger.info(f"Saved {self.job_id} spec to {spec_path}")
         return spec_path
 
     def save_summary(self, summary: dict) -> Path:
         """Save the generated summary."""
         summary_path = self.job_dir / "summary.json"
-        summary_path.write_text(str(summary))
+        summary_path.write_text(json.dumps(summary, indent=2))
+        self.log_event("Saved summary")
         logger.info(f"Saved {self.job_id} summary to {summary_path}")
         return summary_path
 
@@ -61,15 +81,28 @@ class JobStorage:
             export_path.write_text(content)
         else:
             export_path.write_bytes(content)
+        self.log_event(f"Saved {format_} export")
         logger.info(f"Saved {self.job_id} export to {export_path}")
         return export_path
 
     def save_parsed_spec(self, parsed_spec: dict) -> Path:
         """Save the parsed OpenAPI spec."""
         parsed_spec_path = self.job_dir / "parsed_spec.json"
-        parsed_spec_path.write_text(str(parsed_spec))
+        parsed_spec_path.write_text(json.dumps(parsed_spec, indent=2))
+        self.log_event("Saved parsed spec")
         logger.info(f"Saved {self.job_id} parsed spec to {parsed_spec_path}")
         return parsed_spec_path
+
+    def log_event(self, message: str) -> None:
+        """Log an event to the execution log file.
+
+        Args:
+            message: Event message to log
+        """
+        timestamp = datetime.now(tz=timezone.utc).isoformat()
+        log_entry = f"[{timestamp}] {message}\n"
+        with self.log_file.open("a") as f:
+            f.write(log_entry)
 
     def get_spec_path(self) -> Path | None:
         """Get the path to the spec file if it exists."""
@@ -94,6 +127,10 @@ class JobStorage:
         path = self.job_dir / "parsed_spec.json"
         return _get_and_log_path(path, self.job_id, JobArtifact.PARSED_SPEC)
 
+    def get_log_path(self) -> Path | None:
+        """Get the path to the execution log if it exists."""
+        return _get_and_log_path(self.log_file, self.job_id, JobArtifact.LOG)
+
     def ensure_export_exists(self, format_: ExportFormat) -> Path:
         """Ensure an export file exists, creating a placeholder if needed."""
         path = self.job_dir / f"summary.{format_}"
@@ -113,19 +150,3 @@ class JobStorage:
             path.write_bytes(b"")  # Empty DOCX for now
 
         return path
-
-
-def _get_and_log_path(path: Path, job_id: str, artifact: JobArtifact) -> Path | None:
-    """Get a path and log it.
-
-    Args:
-        path: The path to get.
-        job_id: The job ID.
-        artifact: The artifact type: SPEC, SUMMARY, or EXPORT.
-    """
-    if path.exists():
-        logger.info(f"Found {job_id} {artifact} at {path}")
-        return path
-
-    logger.warning(f"No {job_id} {artifact} found at {path}")
-    return None

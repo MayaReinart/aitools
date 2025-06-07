@@ -1,14 +1,17 @@
+from typing import Any
 from uuid import uuid4
 
+from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
 
 from src.api.models import validate_spec_file
-from src.core.models import TaskStateInfo
+from src.core.models import TaskState
 from src.core.state import StateStore
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
-from src.tasks.tasks import summarize_doc_task
+from src.tasks.pipeline import create_processing_chain
+from src.tasks.standalone import analyze_api_task
 
 router = APIRouter(prefix="/api", tags=["api"])
 state_store = StateStore()
@@ -42,20 +45,19 @@ async def upload_spec(
     # Generate a unique job ID
     job_id = str(uuid4())
 
-    # Initialize storage
-    storage = JobStorage(job_id)
-
     # Save the uploaded spec
-    format_ = _detect_format(file.content_type)
-    storage.save_spec(spec_content, format_)
+    storage = JobStorage(job_id)
+    spec_format = _detect_format(file.content_type)
+    storage.save_spec(spec_content, spec_format)
 
-    # Start the processing task
-    summarize_doc_task.delay(spec_content, job_id, storage)
+    # Start the processing chain
+    chain = create_processing_chain(spec_content, job_id)
+    chain.delay()
 
     return {"job_id": job_id}
 
 
-@router.get("/spec/{job_id}/summary", response_model=None)
+@router.get("/spec/{job_id}/summary")
 async def get_summary(job_id: str) -> JSONResponse:
     """Retrieve a plain-English summary of the spec"""
     storage = JobStorage(job_id)
@@ -64,7 +66,7 @@ async def get_summary(job_id: str) -> JSONResponse:
     state = state_store.get_state(job_id)
     if not state:
         # Fall back to Celery state if not in our store
-        result = summarize_doc_task.AsyncResult(job_id)
+        result: AsyncResult[dict[str, Any]] = analyze_api_task.AsyncResult(job_id)
         if result.status == "PENDING":
             raise HTTPException(
                 status_code=status.HTTP_202_ACCEPTED,
@@ -75,7 +77,14 @@ async def get_summary(job_id: str) -> JSONResponse:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Job failed",
             )
-        return JSONResponse(content={"status": result.status, "result": result.result})
+
+        # For success case, ensure we're returning a dict
+        task_result = (
+            result.result
+            if isinstance(result.result, dict)
+            else {"result": result.result}
+        )
+        return JSONResponse(content={"status": result.status, "result": task_result})
 
     # Return state from our store
     if state.state.value in ["PENDING", "STARTED", "PROGRESS"]:
@@ -87,7 +96,7 @@ async def get_summary(job_id: str) -> JSONResponse:
             },
         )
 
-    if state.state == "FAILURE":
+    if state.state == TaskState.FAILURE:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=state.error or "Job failed",
@@ -101,16 +110,74 @@ async def get_summary(job_id: str) -> JSONResponse:
     return JSONResponse(content={"status": state.state.value, "result": state.result})
 
 
-@router.get("/spec/{job_id}/state", response_model=TaskStateInfo)
-async def get_state(job_id: str) -> TaskStateInfo:
-    """Get detailed task state information."""
+@router.get("/spec/{job_id}/state")
+async def get_job_state(job_id: str) -> JSONResponse:
+    """Get the current state of a job.
+
+    Args:
+        job_id: Unique job identifier
+
+    Returns:
+        JSONResponse: Current job state and progress
+    """
+    # Check task state
     state = state_store.get_state(job_id)
     if not state:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Job not found",
+        # Fall back to Celery state if not in our store
+        result: AsyncResult[dict[str, Any]] = analyze_api_task.AsyncResult(job_id)
+        if result.status == "PENDING":
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content={
+                    "status": "PENDING",
+                    "message": "Job is queued for processing",
+                },
+            )
+        if result.status == "FAILURE":
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={
+                    "status": "FAILURE",
+                    "error": str(result.result) if result.result else "Unknown error",
+                },
+            )
+
+        # For success case, ensure we're returning a dict
+        task_result = (
+            result.result
+            if isinstance(result.result, dict)
+            else {"result": result.result}
         )
-    return state
+        return JSONResponse(
+            content={
+                "status": result.status,
+                "result": task_result,
+            }
+        )
+
+    # Return state from our store
+    response: dict[str, Any] = {
+        "status": state.state.value,
+        "created_at": state.created_at.isoformat(),
+        "updated_at": state.updated_at.isoformat(),
+    }
+
+    if state.progress:
+        latest_progress = state.progress[-1]
+        response["progress"] = {
+            "stage": latest_progress.stage,
+            "percentage": latest_progress.progress,
+            "message": latest_progress.message,
+            "timestamp": latest_progress.timestamp.isoformat(),
+        }
+
+    if state.state == TaskState.FAILURE:
+        response["error"] = state.error if state.error else "Unknown error"
+
+    if state.state == TaskState.SUCCESS and state.result:
+        response["result"] = state.result
+
+    return JSONResponse(content=response)
 
 
 @router.get("/spec/{job_id}/export", response_model=None)

@@ -9,7 +9,7 @@ import pytest
 
 from src.core.storage import JobStorage
 from src.services.parser import ParsedSpec
-from src.tasks.tasks import summarize_doc_task
+from src.tasks.standalone import analyze_api_task
 
 
 @pytest.fixture
@@ -38,8 +38,8 @@ def mock_storage(job_id: str) -> Mock:
     return storage
 
 
-class TestSummarizeDocTask:
-    """Tests for summarize_doc_task."""
+class TestAnalyzeAPITask:
+    """Tests for analyze_api_task."""
 
     def test_no_cache(self, mock_storage: Mock, sample_spec: str, job_id: str) -> None:
         """Test task behavior when no cached spec exists."""
@@ -54,13 +54,13 @@ class TestSummarizeDocTask:
         )
 
         with (
-            patch("src.tasks.tasks.parse_openapi_spec") as mock_parse,
-            patch("src.tasks.tasks.get_llm_spec_analysis") as mock_analyze,
+            patch("src.tasks.standalone.parse_openapi_spec") as mock_parse,
+            patch("src.tasks.standalone.get_llm_spec_analysis") as mock_analyze,
         ):
             mock_parse.return_value = parsed_spec
             mock_analyze.return_value = {"summary": "Test summary"}
 
-            result = summarize_doc_task(sample_spec, job_id, mock_storage)
+            result = analyze_api_task(sample_spec, job_id, mock_storage)
 
             # Verify parsing was called
             mock_parse.assert_called_once_with(sample_spec)
@@ -90,12 +90,12 @@ class TestSummarizeDocTask:
             json.dump(cached_spec, f)
 
         with (
-            patch("src.tasks.tasks.parse_openapi_spec") as mock_parse,
-            patch("src.tasks.tasks.get_llm_spec_analysis") as mock_analyze,
+            patch("src.tasks.standalone.parse_openapi_spec") as mock_parse,
+            patch("src.tasks.standalone.get_llm_spec_analysis") as mock_analyze,
         ):
             mock_analyze.return_value = {"summary": "Test summary"}
 
-            result = summarize_doc_task(sample_spec, job_id, mock_storage)
+            result = analyze_api_task(sample_spec, job_id, mock_storage)
 
             # Verify parsing was not called
             mock_parse.assert_not_called()
@@ -114,9 +114,9 @@ class TestSummarizeDocTask:
         )
 
         with (
-            patch("src.tasks.tasks.JobStorage") as mock_storage_class,
-            patch("src.tasks.tasks.parse_openapi_spec") as mock_parse,
-            patch("src.tasks.tasks.get_llm_spec_analysis") as mock_analyze,
+            patch("src.tasks.standalone.JobStorage") as mock_storage_class,
+            patch("src.tasks.standalone.parse_openapi_spec") as mock_parse,
+            patch("src.tasks.standalone.get_llm_spec_analysis") as mock_analyze,
         ):
             mock_storage = Mock()
             mock_storage_class.return_value = mock_storage
@@ -124,7 +124,7 @@ class TestSummarizeDocTask:
             mock_parse.return_value = parsed_spec
             mock_analyze.return_value = {"summary": "Test summary"}
 
-            summarize_doc_task(sample_spec, job_id)
+            analyze_api_task(sample_spec, job_id)
 
             # Verify storage was created with job_id
             mock_storage_class.assert_called_once_with(job_id)
