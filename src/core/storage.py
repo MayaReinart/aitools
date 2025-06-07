@@ -7,8 +7,10 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.core.config import settings
+
 # Default path for job data, can be overridden in tests
-JOB_DATA_ROOT = Path("results")
+JOB_DATA_ROOT = settings.job_data_path
 
 
 class JobArtifact(str, Enum):
@@ -36,7 +38,7 @@ class ExportFormat(str, Enum):
     DOCX = "docx"
 
 
-def _get_and_log_path(path: Path, job_id: str, artifact: JobArtifact) -> Path | None:
+def _get_and_log_path(path: Path, job_id: str, artifact: str) -> Path | None:
     """Check if a path exists and log the result."""
     if path.exists():
         logger.debug(f"Found {job_id} {artifact} at {path}")
@@ -52,15 +54,15 @@ class JobStorage:
         self.job_id = job_id
         self.job_dir = JOB_DATA_ROOT / job_id
 
-        # Ensure root directory exists
-        JOB_DATA_ROOT.mkdir(exist_ok=True)
-        # Create job directory
-        self.job_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure root directory exists with proper permissions
+        JOB_DATA_ROOT.mkdir(mode=0o755, parents=True, exist_ok=True)
+        # Create job directory with proper permissions
+        self.job_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
 
         # Initialize log file
         self.log_file = self.job_dir / "execution.log"
         if not self.log_file.exists():
-            self.log_file.touch()
+            self.log_file.touch(mode=0o644)
 
     def save_spec(self, content: str, format_: SpecFormat) -> Path:
         """Save the uploaded spec file."""

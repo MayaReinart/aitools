@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       redis:
-        image: redis
+        image: redis:latest
         ports:
           - 6379:6379
         options: >-
@@ -19,6 +19,8 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+        env:
+          ALLOW_EMPTY_PASSWORD: "yes"
 
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +54,10 @@ jobs:
         run: |
           mkdir -p /tmp/api_test_results
           chmod -R 755 /tmp/api_test_results
+
+      - name: Verify Redis connection
+        run: |
+          redis-cli ping || (echo "Redis connection failed" && exit 1)
 
       - name: Run pre-commit hooks
         run: |

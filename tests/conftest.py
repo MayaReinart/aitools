@@ -10,6 +10,7 @@ from fastapi import UploadFile
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.completion_usage import CompletionUsage
 from redis import Redis
+from redis.exceptions import ConnectionError
 
 from celery_worker import celery_app
 from src.core.models import TaskProgress, TaskState, TaskStateInfo
@@ -19,6 +20,16 @@ from src.services.llm import EndpointAnalysis, SpecAnalysis
 
 SAMPLES_PATH = Path(__file__).parent / "samples"
 TEST_TIMESTAMP = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def check_redis_connection() -> None:
+    """Check Redis connection before running tests."""
+    try:
+        redis = Redis.from_url("redis://localhost:6379/0")
+        redis.ping()
+    except ConnectionError as e:
+        pytest.exit(f"Redis connection failed: {e}. Please ensure Redis is running.")
 
 
 @pytest.fixture(autouse=True)
@@ -47,9 +58,10 @@ def pytest_configure() -> None:
 
 @pytest.fixture
 def mock_redis() -> Mock:
-    """Create a mock Redis instance."""
+    """Create a mock Redis instance for unit tests."""
     redis = Mock(spec=Redis)
     redis.get.return_value = None  # Default to no state
+    redis.setex.return_value = True  # Default behavior for setting keys
     return redis
 
 
