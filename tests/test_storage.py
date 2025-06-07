@@ -1,5 +1,6 @@
 """Tests for storage functionality."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -30,8 +31,8 @@ class TestJobStorage:
         assert path.name == "parsed_spec.json"
 
         # Verify content
-        saved_content = path.read_text()
-        assert str(parsed_spec) in saved_content
+        saved_content = json.loads(path.read_text())
+        assert saved_content == parsed_spec
 
     def test_get_parsed_spec_path_exists(self, job_storage: JobStorage) -> None:
         """Test getting path to existing parsed spec."""
