@@ -55,6 +55,11 @@ jobs:
           mkdir -p /tmp/api_test_results
           chmod -R 755 /tmp/api_test_results
 
+      - name: Install Redis CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-tools
+
       - name: Verify Redis connection
         run: |
           redis-cli ping || (echo "Redis connection failed" && exit 1)
