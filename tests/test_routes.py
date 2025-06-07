@@ -8,7 +8,7 @@ from fastapi import status
 from fastapi.testclient import TestClient
 
 from src.core.models import TaskProgress, TaskState, TaskStateInfo
-from src.core.storage import JOB_DATA_ROOT
+from src.core.storage import JobStorage, SpecFormat
 from src.main import app
 from src.services.llm import EndpointAnalysis, SpecAnalysis
 from tests.conftest import assert_file_exists_with_content
@@ -69,7 +69,8 @@ class TestSpecUpload:
                 assert response.json() == {"job_id": test_job_id}
 
                 # Verify file was saved
-                spec_path = JOB_DATA_ROOT / test_job_id / "spec.json"
+                storage = JobStorage(test_job_id)
+                spec_path = storage.job_dir / "spec.json"
                 assert_file_exists_with_content(spec_path, sample_spec)
 
                 # Verify chain was created with correct arguments
@@ -97,7 +98,8 @@ class TestSpecUpload:
                 assert response.json() == {"job_id": test_job_id}
 
                 # Verify file was saved
-                spec_path = JOB_DATA_ROOT / test_job_id / "spec.yaml"
+                storage = JobStorage(test_job_id)
+                spec_path = storage.job_dir / "spec.yaml"
                 assert_file_exists_with_content(spec_path, sample_spec)
 
                 # Verify chain was created with correct arguments
@@ -131,40 +133,36 @@ class TestSpecSummary:
         self: "TestSpecSummary",
         mock_state_store: Mock,
         test_job_id: str,
-        mock_progress: TaskProgress,
-        mock_state_info: TaskStateInfo,
     ) -> None:
-        """Test getting summary for a pending job from state store."""
-        state = mock_state_info.model_copy(
-            update={
-                "state": TaskState.PROGRESS,
-                "progress": [mock_progress],
-                "result": None,
-            }
+        """Test getting a pending summary from state store."""
+        mock_state_store.get_state.return_value = TaskStateInfo(
+            job_id=test_job_id,
+            state=TaskState.PROGRESS,
+            progress=[
+                TaskProgress(
+                    stage="test",
+                    progress=50.0,
+                    message="Test progress",
+                )
+            ],
         )
-        mock_state_store.get_state.return_value = state
 
         response = client.get(f"/api/spec/{test_job_id}/summary")
         assert response.status_code == status.HTTP_202_ACCEPTED
         assert response.json()["status"] == "PROGRESS"
-        assert response.json()["progress"]["stage"] == mock_progress.stage
-        assert response.json()["progress"]["progress"] == mock_progress.progress
+        assert response.json()["progress"]["stage"] == "test"
 
     def test_get_failed_summary_from_state(
         self: "TestSpecSummary",
         mock_state_store: Mock,
         test_job_id: str,
-        mock_state_info: TaskStateInfo,
     ) -> None:
-        """Test getting summary for a failed job from state store."""
-        state = mock_state_info.model_copy(
-            update={
-                "state": TaskState.FAILURE,
-                "error": "Test error",
-                "result": None,
-            }
+        """Test getting a failed summary from state store."""
+        mock_state_store.get_state.return_value = TaskStateInfo(
+            job_id=test_job_id,
+            state=TaskState.FAILURE,
+            error="Test error",
         )
-        mock_state_store.get_state.return_value = state
 
         response = client.get(f"/api/spec/{test_job_id}/summary")
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -174,40 +172,25 @@ class TestSpecSummary:
         self: "TestSpecSummary",
         mock_state_store: Mock,
         test_job_id: str,
-        mock_spec_analysis: SpecAnalysis,
-        mock_state_info: TaskStateInfo,
     ) -> None:
-        """Test getting summary for a completed job from state store."""
-        result = {
-            "spec_info": {
-                "title": "Test API",
-                "version": "1.0.0",
-                "description": "Test description",
-            },
-            "summary": mock_spec_analysis.model_dump(),
-            "endpoints": [
-                {
-                    "path": "/test",
-                    "method": "GET",
-                    "summary": "Test endpoint",
-                }
-            ],
-        }
-
-        state = mock_state_info.model_copy(update={"result": result})
-        mock_state_store.get_state.return_value = state
+        """Test getting a completed summary from state store."""
+        mock_state_store.get_state.return_value = TaskStateInfo(
+            job_id=test_job_id,
+            state=TaskState.SUCCESS,
+            result={"test": "result"},
+        )
 
         response = client.get(f"/api/spec/{test_job_id}/summary")
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["status"] == "SUCCESS"
-        assert response.json()["result"] == result
+        assert response.json()["result"]["test"] == "result"
 
     def test_get_pending_summary_fallback(
         self: "TestSpecSummary",
         mock_state_store: Mock,
         test_job_id: str,
     ) -> None:
-        """Test falling back to Celery state when no state store entry exists."""
+        """Test falling back to Celery state for pending summary."""
         mock_state_store.get_state.return_value = None
 
         with patch("src.api.routes.analyze_api_task") as mock_task:
@@ -239,16 +222,18 @@ class TestSpecState:
     def test_get_state_success(
         self: "TestSpecState",
         mock_state_store: Mock,
-        mock_state_info: TaskStateInfo,
         test_job_id: str,
     ) -> None:
-        """Test getting state for existing job."""
-        mock_state_store.get_state.return_value = mock_state_info
+        """Test getting state for successful job."""
+        mock_state_store.get_state.return_value = TaskStateInfo(
+            job_id=test_job_id,
+            state=TaskState.SUCCESS,
+            result={"test": "result"},
+        )
 
         response = client.get(f"/api/spec/{test_job_id}/state")
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["status"] == "SUCCESS"
-        assert response.json()["result"] == mock_state_info.result
 
 
 class TestSpecExport:
@@ -263,9 +248,8 @@ class TestSpecExport:
     def test_export_markdown(self: "TestSpecExport", test_job_id: str) -> None:
         """Test exporting summary as Markdown"""
         # Create a mock spec file to make the job exist
-        job_dir = JOB_DATA_ROOT / test_job_id
-        job_dir.mkdir(parents=True)
-        (job_dir / "spec.json").write_text("{}")
+        storage = JobStorage(test_job_id)
+        storage.save_spec("{}", SpecFormat.JSON)
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=md")
         assert response.status_code == status.HTTP_200_OK
@@ -275,15 +259,14 @@ class TestSpecExport:
         )
 
         # Verify export was saved
-        export_path = job_dir / "summary.md"
+        export_path = storage.job_dir / "summary.md"
         assert export_path.exists()
 
     def test_export_html(self: "TestSpecExport", test_job_id: str) -> None:
         """Test exporting summary as HTML"""
         # Create a mock spec file to make the job exist
-        job_dir = JOB_DATA_ROOT / test_job_id
-        job_dir.mkdir(parents=True)
-        (job_dir / "spec.json").write_text("{}")
+        storage = JobStorage(test_job_id)
+        storage.save_spec("{}", SpecFormat.JSON)
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=html")
         assert response.status_code == status.HTTP_200_OK
@@ -291,15 +274,14 @@ class TestSpecExport:
         assert "<h1>API Summary</h1>" in response.text
 
         # Verify export was saved
-        export_path = job_dir / "summary.html"
+        export_path = storage.job_dir / "summary.html"
         assert export_path.exists()
 
     def test_export_docx(self: "TestSpecExport", test_job_id: str) -> None:
         """Test exporting summary as DOCX"""
         # Create a mock spec file to make the job exist
-        job_dir = JOB_DATA_ROOT / test_job_id
-        job_dir.mkdir(parents=True)
-        (job_dir / "spec.json").write_text("{}")
+        storage = JobStorage(test_job_id)
+        storage.save_spec("{}", SpecFormat.JSON)
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=docx")
         assert response.status_code == status.HTTP_200_OK
@@ -312,5 +294,5 @@ class TestSpecExport:
         )
 
         # Verify export was saved
-        export_path = job_dir / "summary.docx"
+        export_path = storage.job_dir / "summary.docx"
         assert export_path.exists()

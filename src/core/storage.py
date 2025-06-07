@@ -7,8 +7,8 @@ from pathlib import Path
 
 from loguru import logger
 
+# Default path for job data, can be overridden in tests
 JOB_DATA_ROOT = Path("results")
-JOB_DATA_ROOT.mkdir(exist_ok=True)
 
 
 class JobArtifact(str, Enum):
@@ -51,6 +51,10 @@ class JobStorage:
     def __init__(self, job_id: str) -> None:
         self.job_id = job_id
         self.job_dir = JOB_DATA_ROOT / job_id
+
+        # Ensure root directory exists
+        JOB_DATA_ROOT.mkdir(exist_ok=True)
+        # Create job directory
         self.job_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize log file

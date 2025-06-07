@@ -1,7 +1,6 @@
 """Tests for storage functionality."""
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -9,14 +8,9 @@ from src.core.storage import JobStorage
 
 
 @pytest.fixture
-def job_storage(tmp_path: Path) -> JobStorage:
-    """Create a temporary JobStorage instance."""
-    job_id = "test-job"
-    storage = JobStorage(job_id)
-    # Override the job data root for testing
-    storage.job_dir = tmp_path / job_id
-    storage.job_dir.mkdir(parents=True, exist_ok=True)
-    return storage
+def job_storage(test_job_id: str) -> JobStorage:
+    """Create a JobStorage instance."""
+    return JobStorage(test_job_id)
 
 
 class TestJobStorage:

@@ -1,8 +1,8 @@
 """Test configuration."""
 
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from shutil import rmtree
 from unittest.mock import Mock
 
 import pytest
@@ -14,11 +14,21 @@ from redis import Redis
 from celery_worker import celery_app
 from src.core.models import TaskProgress, TaskState, TaskStateInfo
 from src.core.state import StateStore
-from src.core.storage import JOB_DATA_ROOT, JobStorage
+from src.core.storage import JobStorage
 from src.services.llm import EndpointAnalysis, SpecAnalysis
 
 SAMPLES_PATH = Path(__file__).parent / "samples"
 TEST_TIMESTAMP = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def temp_job_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use a temporary directory for job data in tests."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        # Patch before any imports or storage creation
+        monkeypatch.setattr("src.core.storage.JOB_DATA_ROOT", temp_path)
+        yield
 
 
 def pytest_configure() -> None:
@@ -26,7 +36,7 @@ def pytest_configure() -> None:
     # Configure Celery for testing before any tests run
     celery_app.conf.update(
         broker_url="memory://",
-        result_backend="cache+memory://",
+        result_backend="redis://",
         task_always_eager=True,
         task_store_eager_result=True,
         broker_connection_retry=False,
@@ -171,14 +181,6 @@ def mock_upload_file() -> UploadFile:
         content_type="application/json",
         headers={"content-type": "application/json"},
     )
-
-
-@pytest.fixture(autouse=True)
-def cleanup_job_data() -> None:
-    """Clean up job data after each test."""
-    yield
-    if JOB_DATA_ROOT.exists():
-        rmtree(JOB_DATA_ROOT)
 
 
 def assert_file_exists_with_content(path: Path, expected_content: str | bytes) -> None:
