@@ -1,16 +1,11 @@
 """Tests for API routes."""
 
 from collections.abc import Generator
-from datetime import datetime, timezone
-from pathlib import Path
-from shutil import rmtree
 from unittest.mock import Mock, patch
 
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-from openai.types.chat import ChatCompletion, ChatCompletionMessage
-from openai.types.completion_usage import CompletionUsage
 
 from src.core.models import TaskProgress, TaskState, TaskStateInfo
 from src.core.storage import JOB_DATA_ROOT
@@ -21,54 +16,11 @@ from tests.conftest import assert_file_exists_with_content
 client = TestClient(app)
 
 
-SAMPLES_PATH = Path(__file__).parent / "samples"
-
-
-def create_mock_chat_completion(content: str) -> ChatCompletion:
-    """Create a mock ChatCompletion object."""
-    return ChatCompletion(
-        id="mock-completion",
-        model="gpt-4",
-        object="chat.completion",
-        created=1234567890,
-        choices=[
-            {
-                "finish_reason": "stop",
-                "index": 0,
-                "message": ChatCompletionMessage(
-                    role="assistant",
-                    content=content,
-                ),
-            }
-        ],
-        usage=CompletionUsage(
-            completion_tokens=100,
-            prompt_tokens=100,
-            total_tokens=200,
-        ),
-    )
-
-
-@pytest.fixture
-def sample_spec() -> bytes:
-    """Load the sample OpenAPI spec for testing"""
-    spec_path = SAMPLES_PATH / "sample.json"
-    return spec_path.read_bytes()
-
-
 @pytest.fixture
 def mock_state_store() -> Generator[Mock, None, None]:
     """Mock the state store."""
     with patch("src.api.routes.state_store") as mock:
         yield mock
-
-
-@pytest.fixture(autouse=True)
-def cleanup_job_data() -> Generator[None, None, None]:
-    """Clean up job data after each test."""
-    yield
-    if JOB_DATA_ROOT.exists():
-        rmtree(JOB_DATA_ROOT)
 
 
 @pytest.fixture(autouse=True)
@@ -180,14 +132,15 @@ class TestSpecSummary:
         mock_state_store: Mock,
         test_job_id: str,
         mock_progress: TaskProgress,
+        mock_state_info: TaskStateInfo,
     ) -> None:
         """Test getting summary for a pending job from state store."""
-        state = TaskStateInfo(
-            job_id=test_job_id,
-            state=TaskState.PROGRESS,
-            created_at=datetime.now(tz=timezone.utc),
-            updated_at=datetime.now(tz=timezone.utc),
-            progress=[mock_progress],
+        state = mock_state_info.model_copy(
+            update={
+                "state": TaskState.PROGRESS,
+                "progress": [mock_progress],
+                "result": None,
+            }
         )
         mock_state_store.get_state.return_value = state
 
@@ -201,14 +154,15 @@ class TestSpecSummary:
         self: "TestSpecSummary",
         mock_state_store: Mock,
         test_job_id: str,
+        mock_state_info: TaskStateInfo,
     ) -> None:
         """Test getting summary for a failed job from state store."""
-        state = TaskStateInfo(
-            job_id=test_job_id,
-            state=TaskState.FAILURE,
-            error="Test error",
-            created_at=datetime.now(tz=timezone.utc),
-            updated_at=datetime.now(tz=timezone.utc),
+        state = mock_state_info.model_copy(
+            update={
+                "state": TaskState.FAILURE,
+                "error": "Test error",
+                "result": None,
+            }
         )
         mock_state_store.get_state.return_value = state
 
@@ -221,6 +175,7 @@ class TestSpecSummary:
         mock_state_store: Mock,
         test_job_id: str,
         mock_spec_analysis: SpecAnalysis,
+        mock_state_info: TaskStateInfo,
     ) -> None:
         """Test getting summary for a completed job from state store."""
         result = {
@@ -239,13 +194,7 @@ class TestSpecSummary:
             ],
         }
 
-        state = TaskStateInfo(
-            job_id=test_job_id,
-            state=TaskState.SUCCESS,
-            result=result,
-            created_at=datetime.now(tz=timezone.utc),
-            updated_at=datetime.now(tz=timezone.utc),
-        )
+        state = mock_state_info.model_copy(update={"result": result})
         mock_state_store.get_state.return_value = state
 
         response = client.get(f"/api/spec/{test_job_id}/summary")
@@ -290,16 +239,16 @@ class TestSpecState:
     def test_get_state_success(
         self: "TestSpecState",
         mock_state_store: Mock,
-        mock_state: TaskStateInfo,
+        mock_state_info: TaskStateInfo,
         test_job_id: str,
     ) -> None:
         """Test getting state for existing job."""
-        mock_state_store.get_state.return_value = mock_state
+        mock_state_store.get_state.return_value = mock_state_info
 
         response = client.get(f"/api/spec/{test_job_id}/state")
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["status"] == "SUCCESS"
-        assert response.json()["result"] == mock_state.result
+        assert response.json()["result"] == mock_state_info.result
 
 
 class TestSpecExport:
