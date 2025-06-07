@@ -102,7 +102,10 @@ inline-quotes = "double"
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]  # Allow assert in tests
+"tests/**/*.py" = [
+    "S101",  # Allow assert in tests
+    "PLR0913",  # Allow many arguments in test functions
+]
 
 [tool.pytest.ini_options]
 log_cli = true
