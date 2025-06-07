@@ -1,0 +1,45 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ENV=production
+      - LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - results:/app/results
+
+  worker:
+    build: .
+    command: poetry run celery -A celery_worker worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ENV=production
+      - LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - results:/app/results
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
+  results:

@@ -33,6 +33,7 @@ openapi-spec-validator = "^0.7.1"
 [tool.poetry.group.dev.dependencies]
 celery-types = "^0.23.0"
 types-pyyaml = "^6.0.12.20250516"
+pytest-cov = "^6.1.1"
 
 [build-system]
 requires = ["poetry-core"]
