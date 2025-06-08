@@ -9,6 +9,7 @@ A service that analyzes OpenAPI specifications and generates natural language su
 - Export summaries in multiple formats (Markdown, HTML, DOCX)
 - Asynchronous processing with job status tracking
 - Structured logging and error handling
+- Simple web interface for file uploads and results access
 
 ## Tech Stack
 
@@ -21,6 +22,7 @@ A service that analyzes OpenAPI specifications and generates natural language su
 | Testing           | pytest + pytest-asyncio                  | Async-aware testing with comprehensive fixtures                        |
 | Code Quality      | Ruff, MyPy, pre-commit                  | Linting, type checking, and automated code quality checks             |
 | AI Integration    | OpenAI API                              | Natural language processing for API analysis                           |
+| Frontend          | Tailwind CSS                            | Minimal web interface for file uploads and results                     |
 
 ## Project Structure
 
@@ -38,6 +40,8 @@ api_introspection/
 │   │   └── openai.py          # OpenAI API integration
 │   └── tasks/
 │       └── tasks.py           # Celery task definitions
+├── web/
+│   └── index.html            # Simple web interface for file uploads
 ├── tests/
 │   ├── test_routes.py         # API endpoint tests
 │   └── conftest.py            # pytest fixtures and configuration
@@ -46,9 +50,20 @@ api_introspection/
 └── DEBUGGING.md              # Development and debugging guide
 ```
 
-## API Documentation
+## Usage
 
-### Endpoints
+### Web Interface
+
+The service provides a simple web interface for file uploads and results access:
+
+1. Open your browser and navigate to `http://localhost:8080`
+2. Use the file upload form to submit your OpenAPI specification
+3. Wait for the analysis to complete
+4. Download the results in your preferred format (Markdown or HTML)
+
+### API Endpoints
+
+For programmatic access, you can use the following API endpoints:
 
 #### 1. Health Check
 

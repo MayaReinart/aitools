@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Introspection</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
+            <h1 class="text-2xl font-bold text-gray-800 mb-6">API Introspection</h1>
+
+            <!-- Upload Form -->
+            <form id="uploadForm" class="space-y-4">
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-4">
+                    <input type="file"
+                           id="specFile"
+                           accept=".yaml,.json,.yml"
+                           class="w-full text-sm text-gray-500
+                                  file:mr-4 file:py-2 file:px-4
+                                  file:rounded-full file:border-0
+                                  file:text-sm file:font-semibold
+                                  file:bg-blue-50 file:text-blue-700
+                                  hover:file:bg-blue-100">
+                </div>
+                <button type="submit"
+                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg
+                               hover:bg-blue-700 transition duration-200">
+                    Upload Spec
+                </button>
+            </form>
+
+            <!-- Status Display -->
+            <div id="statusDisplay" class="hidden mt-6 space-y-4">
+                <div class="flex items-center space-x-2">
+                    <div class="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+                    <p id="statusText" class="text-gray-600">Processing...</p>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div id="progressBar" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" class="hidden mt-6 space-y-4">
+                <h2 class="text-lg font-semibold text-gray-800">Results</h2>
+                <div id="downloadLinks" class="space-y-2">
+                    <!-- Download links will be inserted here -->
+                </div>
+            </div>
+
+            <!-- Error Display -->
+            <div id="errorDisplay" class="hidden mt-6 p-4 bg-red-50 text-red-700 rounded-lg">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('uploadForm');
+        const statusDisplay = document.getElementById('statusDisplay');
+        const statusText = document.getElementById('statusText');
+        const progressBar = document.getElementById('progressBar');
+        const resultsSection = document.getElementById('resultsSection');
+        const downloadLinks = document.getElementById('downloadLinks');
+        const errorDisplay = document.getElementById('errorDisplay');
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('specFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                showError('Please select a file to upload');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                // Show status display and hide any previous results/errors
+                statusDisplay.classList.remove('hidden');
+                resultsSection.classList.add('hidden');
+                errorDisplay.classList.add('hidden');
+
+                // Upload file
+                const response = await fetch('/spec/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Upload failed: ${response.statusText}`);
+                }
+
+                const { job_id } = await response.json();
+                pollStatus(job_id);
+            } catch (error) {
+                showError(error.message);
+                statusDisplay.classList.add('hidden');
+            }
+        });
+
+        async function pollStatus(jobId) {
+            try {
+                const response = await fetch(`/spec/${jobId}/summary`);
+                const data = await response.json();
+
+                if (data.status === 'completed') {
+                    showResults(jobId);
+                    statusDisplay.classList.add('hidden');
+                } else if (data.status === 'failed') {
+                    showError('Processing failed. Please try again.');
+                    statusDisplay.classList.add('hidden');
+                } else {
+                    // Update progress if available
+                    if (data.progress) {
+                        progressBar.style.width = `${data.progress}%`;
+                        statusText.textContent = `Processing: ${data.progress}%`;
+                    }
+                    // Continue polling
+                    setTimeout(() => pollStatus(jobId), 2000);
+                }
+            } catch (error) {
+                showError('Failed to check status. Please try again.');
+                statusDisplay.classList.add('hidden');
+            }
+        }
+
+        function showResults(jobId) {
+            resultsSection.classList.remove('hidden');
+            downloadLinks.innerHTML = `
+                <a href="/spec/${jobId}/export?format=markdown"
+                   class="block w-full text-center bg-gray-100 hover:bg-gray-200
+                          text-gray-800 font-semibold py-2 px-4 rounded-lg
+                          transition duration-200">
+                    Download Markdown
+                </a>
+                <a href="/spec/${jobId}/export?format=html"
+                   class="block w-full text-center bg-gray-100 hover:bg-gray-200
+                          text-gray-800 font-semibold py-2 px-4 rounded-lg
+                          transition duration-200">
+                    Download HTML
+                </a>
+            `;
+        }
+
+        function showError(message) {
+            errorDisplay.classList.remove('hidden');
+            errorDisplay.textContent = message;
+        }
+    </script>
+</body>
+</html>
