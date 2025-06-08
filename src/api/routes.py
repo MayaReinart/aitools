@@ -201,27 +201,17 @@ async def export_summary(
             detail="Job not found",
         )
 
-    # Create the export file if it doesn't exist
-    path = storage.ensure_export_exists(file_format)
+    # Get the export content and media type
+    content, media_type = storage.get_export_content(file_format)
 
+    # Return appropriate response based on content type
     if file_format == ExportFormat.HTML:
-        return HTMLResponse(path.read_text())
-
-    if file_format == ExportFormat.MARKDOWN:
-        return FileResponse(
-            path=str(path),
-            media_type="text/markdown; charset=utf-8",
-            filename=f"api-summary-{job_id}.md",
-        )
-
+        return HTMLResponse(content=content)
     if file_format == ExportFormat.DOCX:
         return FileResponse(
-            path=str(path),
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            path=storage.ensure_export_exists(file_format),
+            media_type=media_type,
             filename=f"api_summary.{file_format}",
         )
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Unsupported file format",
-    )  # Unreachable but keeps mypy happy
+    # MARKDOWN
+    return Response(content=content, media_type=media_type)
