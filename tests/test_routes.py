@@ -56,6 +56,9 @@ class TestSpecUpload:
         test_job_id: str,
     ) -> None:
         """Test uploading a valid JSON OpenAPI spec"""
+        # Create storage instance to ensure directory exists
+        storage = JobStorage(test_job_id)
+
         with patch("src.api.routes.create_processing_chain") as mock_chain:
             mock_chain.return_value.delay.return_value = None
             with patch("src.api.routes.uuid4") as mock_uuid:
@@ -69,7 +72,6 @@ class TestSpecUpload:
                 assert response.json() == {"job_id": test_job_id}
 
                 # Verify file was saved
-                storage = JobStorage(test_job_id)
                 spec_path = storage.job_dir / "spec.json"
                 assert_file_exists_with_content(spec_path, sample_spec)
 
@@ -85,6 +87,9 @@ class TestSpecUpload:
         test_job_id: str,
     ) -> None:
         """Test uploading with YAML content type"""
+        # Create storage instance to ensure directory exists
+        storage = JobStorage(test_job_id)
+
         with patch("src.api.routes.create_processing_chain") as mock_chain:
             mock_chain.return_value.delay.return_value = None
             with patch("src.api.routes.uuid4") as mock_uuid:
@@ -98,7 +103,6 @@ class TestSpecUpload:
                 assert response.json() == {"job_id": test_job_id}
 
                 # Verify file was saved
-                storage = JobStorage(test_job_id)
                 spec_path = storage.job_dir / "spec.yaml"
                 assert_file_exists_with_content(spec_path, sample_spec)
 
@@ -249,7 +253,8 @@ class TestSpecExport:
         """Test exporting summary as Markdown"""
         # Create a mock spec file to make the job exist
         storage = JobStorage(test_job_id)
-        storage.save_spec("{}", SpecFormat.JSON)
+        storage.save_spec("test spec", SpecFormat.JSON)
+        storage.save_summary({"test": "summary"})
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=md")
         assert response.status_code == status.HTTP_200_OK
@@ -266,7 +271,8 @@ class TestSpecExport:
         """Test exporting summary as HTML"""
         # Create a mock spec file to make the job exist
         storage = JobStorage(test_job_id)
-        storage.save_spec("{}", SpecFormat.JSON)
+        storage.save_spec("test spec", SpecFormat.JSON)
+        storage.save_summary({"test": "summary"})
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=html")
         assert response.status_code == status.HTTP_200_OK
@@ -281,7 +287,8 @@ class TestSpecExport:
         """Test exporting summary as DOCX"""
         # Create a mock spec file to make the job exist
         storage = JobStorage(test_job_id)
-        storage.save_spec("{}", SpecFormat.JSON)
+        storage.save_spec("test spec", SpecFormat.JSON)
+        storage.save_summary({"test": "summary"})
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=docx")
         assert response.status_code == status.HTTP_200_OK

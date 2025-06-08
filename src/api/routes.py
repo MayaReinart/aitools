@@ -188,13 +188,20 @@ async def export_summary(
     """Export the summary in various formats"""
     storage = JobStorage(job_id)
 
-    # Check if the job exists
-    if not storage.get_spec_path():
+    # Check if the job exists and has a summary
+    if not storage.get_summary_path():
+        # Check if job exists but summary is not ready
+        if storage.get_spec_path():
+            raise HTTPException(
+                status_code=status.HTTP_202_ACCEPTED,
+                detail="Summary is not ready yet",
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Job not found",
         )
 
+    # Create the export file if it doesn't exist
     path = storage.ensure_export_exists(file_format)
 
     if file_format == ExportFormat.HTML:
@@ -211,7 +218,7 @@ async def export_summary(
         return FileResponse(
             path=str(path),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=f"api-summary-{job_id}.docx",
+            filename=f"api_summary.{file_format}",
         )
 
     raise HTTPException(

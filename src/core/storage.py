@@ -66,7 +66,7 @@ class JobStorage:
 
     def save_spec(self, content: str, format_: SpecFormat) -> Path:
         """Save the uploaded spec file."""
-        spec_path = self.job_dir / f"spec.{format_}"
+        spec_path = self.job_dir / f"spec.{format_.value}"
         spec_path.write_text(content)
         self.log_event("Saved spec file")
         logger.info(f"Saved {self.job_id} spec to {spec_path}")
