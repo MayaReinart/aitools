@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
+from docx import Document
 from loguru import logger
 
 from src.core.config import settings
@@ -66,7 +67,7 @@ class JobStorage:
 
     def save_spec(self, content: str, format_: SpecFormat) -> Path:
         """Save the uploaded spec file."""
-        spec_path = self.job_dir / f"spec.{format_}"
+        spec_path = self.job_dir / f"spec.{format_.value}"
         spec_path.write_text(content)
         self.log_event("Saved spec file")
         logger.info(f"Saved {self.job_id} spec to {spec_path}")
@@ -147,12 +148,33 @@ class JobStorage:
 
         logger.info(f"Creating {self.job_id} {format_} export at {path}")
 
-        path.touch()
         if format_ == ExportFormat.MARKDOWN:
             path.write_text("# API Summary\n\nTo be implemented")
         elif format_ == ExportFormat.HTML:
             path.write_text("<h1>API Summary</h1>\n<p>To be implemented</p>")
         elif format_ == ExportFormat.DOCX:
-            path.write_bytes(b"")  # Empty DOCX for now
+            # Create a minimal DOCX file with a title
+            doc = Document()
+            doc.add_heading("API Summary", 0)
+            doc.add_paragraph("To be implemented")
+            doc.save(str(path))
 
         return path
+
+    def get_export_content(self, format_: ExportFormat) -> tuple[str | bytes, str]:
+        """Get export content and media type for a given format.
+
+        Returns:
+            A tuple of (content, media_type)
+        """
+        path = self.ensure_export_exists(format_)
+
+        if format_ == ExportFormat.HTML:
+            return path.read_text(), "text/html"
+        if format_ == ExportFormat.DOCX:
+            return (
+                path.read_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        # MARKDOWN
+        return path.read_text(), "text/markdown"

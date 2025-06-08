@@ -1,11 +1,9 @@
-# Use Python 3.10 as base image
-FROM python:3.10-slim as base
-
-# Set working directory
-WORKDIR /app
+# Use Python 3.11 as base image
+FROM python:3.11-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
+    build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

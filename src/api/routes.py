@@ -188,33 +188,30 @@ async def export_summary(
     """Export the summary in various formats"""
     storage = JobStorage(job_id)
 
-    # Check if the job exists
-    if not storage.get_spec_path():
+    # Check if the job exists and has a summary
+    if not storage.get_summary_path():
+        # Check if job exists but summary is not ready
+        if storage.get_spec_path():
+            raise HTTPException(
+                status_code=status.HTTP_202_ACCEPTED,
+                detail="Summary is not ready yet",
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Job not found",
         )
 
-    path = storage.ensure_export_exists(file_format)
+    # Get the export content and media type
+    content, media_type = storage.get_export_content(file_format)
 
+    # Return appropriate response based on content type
     if file_format == ExportFormat.HTML:
-        return HTMLResponse(path.read_text())
-
-    if file_format == ExportFormat.MARKDOWN:
-        return FileResponse(
-            path=str(path),
-            media_type="text/markdown; charset=utf-8",
-            filename=f"api-summary-{job_id}.md",
-        )
-
+        return HTMLResponse(content=content)
     if file_format == ExportFormat.DOCX:
         return FileResponse(
-            path=str(path),
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=f"api-summary-{job_id}.docx",
+            path=storage.ensure_export_exists(file_format),
+            media_type=media_type,
+            filename=f"api_summary.{file_format}",
         )
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Unsupported file format",
-    )  # Unreachable but keeps mypy happy
+    # MARKDOWN
+    return Response(content=content, media_type=media_type)

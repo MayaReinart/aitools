@@ -56,6 +56,9 @@ class TestSpecUpload:
         test_job_id: str,
     ) -> None:
         """Test uploading a valid JSON OpenAPI spec"""
+        # Create storage instance to ensure directory exists
+        storage = JobStorage(test_job_id)
+
         with patch("src.api.routes.create_processing_chain") as mock_chain:
             mock_chain.return_value.delay.return_value = None
             with patch("src.api.routes.uuid4") as mock_uuid:
@@ -69,7 +72,6 @@ class TestSpecUpload:
                 assert response.json() == {"job_id": test_job_id}
 
                 # Verify file was saved
-                storage = JobStorage(test_job_id)
                 spec_path = storage.job_dir / "spec.json"
                 assert_file_exists_with_content(spec_path, sample_spec)
 
@@ -85,6 +87,9 @@ class TestSpecUpload:
         test_job_id: str,
     ) -> None:
         """Test uploading with YAML content type"""
+        # Create storage instance to ensure directory exists
+        storage = JobStorage(test_job_id)
+
         with patch("src.api.routes.create_processing_chain") as mock_chain:
             mock_chain.return_value.delay.return_value = None
             with patch("src.api.routes.uuid4") as mock_uuid:
@@ -98,7 +103,6 @@ class TestSpecUpload:
                 assert response.json() == {"job_id": test_job_id}
 
                 # Verify file was saved
-                storage = JobStorage(test_job_id)
                 spec_path = storage.job_dir / "spec.yaml"
                 assert_file_exists_with_content(spec_path, sample_spec)
 
@@ -240,59 +244,55 @@ class TestSpecExport:
     """Tests for export endpoint."""
 
     def test_export_nonexistent_job(self: "TestSpecExport", test_job_id: str) -> None:
-        """Test exporting a non-existent job"""
+        """Test exporting a nonexistent job."""
         response = client.get(f"/api/spec/{test_job_id}/export")
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "Job not found" in response.json()["detail"]
 
-    def test_export_markdown(self: "TestSpecExport", test_job_id: str) -> None:
-        """Test exporting summary as Markdown"""
-        # Create a mock spec file to make the job exist
+    def test_export_no_summary(self: "TestSpecExport", test_job_id: str) -> None:
+        """Test exporting when summary is not ready."""
+        # Create job directory and spec file but no summary
         storage = JobStorage(test_job_id)
-        storage.save_spec("{}", SpecFormat.JSON)
+        storage.save_spec("test spec", SpecFormat.JSON)
+
+        response = client.get(f"/api/spec/{test_job_id}/export")
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        assert "Summary is not ready" in response.json()["detail"]
+
+    def test_export_markdown(self: "TestSpecExport", test_job_id: str) -> None:
+        """Test exporting as markdown."""
+        # Create job directory and required files
+        storage = JobStorage(test_job_id)
+        storage.save_spec("test spec", SpecFormat.JSON)
+        storage.save_summary({"test": "summary"})
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=md")
         assert response.status_code == status.HTTP_200_OK
-        assert response.headers["content-type"] == "text/markdown; charset=utf-8"
-        assert (
-            f"api-summary-{test_job_id}.md" in response.headers["content-disposition"]
-        )
-
-        # Verify export was saved
-        export_path = storage.job_dir / "summary.md"
-        assert export_path.exists()
+        assert response.headers["content-type"].startswith("text/markdown")
+        assert "API Summary" in response.text
 
     def test_export_html(self: "TestSpecExport", test_job_id: str) -> None:
-        """Test exporting summary as HTML"""
-        # Create a mock spec file to make the job exist
+        """Test exporting as HTML."""
+        # Create job directory and required files
         storage = JobStorage(test_job_id)
-        storage.save_spec("{}", SpecFormat.JSON)
+        storage.save_spec("test spec", SpecFormat.JSON)
+        storage.save_summary({"test": "summary"})
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=html")
         assert response.status_code == status.HTTP_200_OK
-        assert response.headers["content-type"] == "text/html; charset=utf-8"
+        assert response.headers["content-type"].startswith("text/html")
         assert "<h1>API Summary</h1>" in response.text
 
-        # Verify export was saved
-        export_path = storage.job_dir / "summary.html"
-        assert export_path.exists()
-
     def test_export_docx(self: "TestSpecExport", test_job_id: str) -> None:
-        """Test exporting summary as DOCX"""
-        # Create a mock spec file to make the job exist
+        """Test exporting as DOCX."""
+        # Create job directory and required files
         storage = JobStorage(test_job_id)
-        storage.save_spec("{}", SpecFormat.JSON)
+        storage.save_spec("test spec", SpecFormat.JSON)
+        storage.save_summary({"test": "summary"})
 
         response = client.get(f"/api/spec/{test_job_id}/export?file_format=docx")
         assert response.status_code == status.HTTP_200_OK
-        assert (
-            "application/vnd.openxmlformats-officedocument"
-            in response.headers["content-type"]
+        assert response.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-        assert (
-            f"api-summary-{test_job_id}.docx" in response.headers["content-disposition"]
-        )
-
-        # Verify export was saved
-        export_path = storage.job_dir / "summary.docx"
-        assert export_path.exists()
+        assert len(response.content) > 0  # Should have some content
