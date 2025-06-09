@@ -1,7 +1,6 @@
 from typing import Any
 from uuid import uuid4
 
-from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
@@ -11,7 +10,6 @@ from src.core.models import TaskState
 from src.core.state import StateStore
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
 from src.tasks.pipeline import create_processing_chain
-from src.tasks.standalone import analyze_api_task
 
 router = APIRouter(prefix="/api", tags=["api"])
 state_store = StateStore()
@@ -65,26 +63,10 @@ async def get_summary(job_id: str) -> JSONResponse:
     # Check task state first
     state = state_store.get_state(job_id)
     if not state:
-        # Fall back to Celery state if not in our store
-        result: AsyncResult[dict[str, Any]] = analyze_api_task.AsyncResult(job_id)
-        if result.status == "PENDING":
-            raise HTTPException(
-                status_code=status.HTTP_202_ACCEPTED,
-                detail="Job is still processing",
-            )
-        if result.status == "FAILURE":
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Job failed",
-            )
-
-        # For success case, ensure we're returning a dict
-        task_result = (
-            result.result
-            if isinstance(result.result, dict)
-            else {"result": result.result}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
         )
-        return JSONResponse(content={"status": result.status, "result": task_result})
 
     # Return state from our store
     if state.state.value in ["PENDING", "STARTED", "PROGRESS"]:
@@ -123,36 +105,9 @@ async def get_job_state(job_id: str) -> JSONResponse:
     # Check task state
     state = state_store.get_state(job_id)
     if not state:
-        # Fall back to Celery state if not in our store
-        result: AsyncResult[dict[str, Any]] = analyze_api_task.AsyncResult(job_id)
-        if result.status == "PENDING":
-            return JSONResponse(
-                status_code=status.HTTP_202_ACCEPTED,
-                content={
-                    "status": "PENDING",
-                    "message": "Job is queued for processing",
-                },
-            )
-        if result.status == "FAILURE":
-            return JSONResponse(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={
-                    "status": "FAILURE",
-                    "error": str(result.result) if result.result else "Unknown error",
-                },
-            )
-
-        # For success case, ensure we're returning a dict
-        task_result = (
-            result.result
-            if isinstance(result.result, dict)
-            else {"result": result.result}
-        )
-        return JSONResponse(
-            content={
-                "status": result.status,
-                "result": task_result,
-            }
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
         )
 
     # Return state from our store

@@ -189,39 +189,9 @@ class TestSpecSummary:
         assert response.json()["status"] == "SUCCESS"
         assert response.json()["result"]["test"] == "result"
 
-    def test_get_pending_summary_fallback(
-        self: "TestSpecSummary",
-        mock_state_store: Mock,
-        test_job_id: str,
-    ) -> None:
-        """Test falling back to Celery state for pending summary."""
-        mock_state_store.get_state.return_value = None
-
-        with patch("src.api.routes.analyze_api_task") as mock_task:
-            mock_task.AsyncResult.return_value = Mock(status="PENDING")
-            response = client.get(f"/api/spec/{test_job_id}/summary")
-            assert response.status_code == status.HTTP_202_ACCEPTED
-            assert "processing" in response.json()["detail"]
-
 
 class TestSpecState:
     """Tests for state endpoint."""
-
-    def test_get_state_not_found(
-        self: "TestSpecState",
-        mock_state_store: Mock,
-        test_job_id: str,
-    ) -> None:
-        """Test getting state for non-existent job."""
-        mock_state_store.get_state.return_value = None
-
-        with patch("src.api.routes.analyze_api_task") as mock_task:
-            mock_result = Mock(status="PENDING")
-            mock_task.AsyncResult.return_value = mock_result
-
-            response = client.get(f"/api/spec/{test_job_id}/state")
-            assert response.status_code == status.HTTP_202_ACCEPTED
-            assert response.json()["status"] == "PENDING"
 
     def test_get_state_success(
         self: "TestSpecState",
