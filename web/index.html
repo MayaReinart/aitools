@@ -85,7 +85,7 @@
                 errorDisplay.classList.add('hidden');
 
                 // Upload file
-                const response = await fetch('/spec/upload', {
+                const response = await fetch('/api/spec/upload', {
                     method: 'POST',
                     body: formData
                 });
@@ -104,7 +104,7 @@
 
         async function pollStatus(jobId) {
             try {
-                const response = await fetch(`/spec/${jobId}/summary`);
+                const response = await fetch(`/api/spec/${jobId}/summary`);
                 const data = await response.json();
 
                 if (data.status === 'completed') {
@@ -131,13 +131,13 @@
         function showResults(jobId) {
             resultsSection.classList.remove('hidden');
             downloadLinks.innerHTML = `
-                <a href="/spec/${jobId}/export?format=markdown"
+                <a href="/api/spec/${jobId}/export?format=markdown"
                    class="block w-full text-center bg-gray-100 hover:bg-gray-200
                           text-gray-800 font-semibold py-2 px-4 rounded-lg
                           transition duration-200">
                     Download Markdown
                 </a>
-                <a href="/spec/${jobId}/export?format=html"
+                <a href="/api/spec/${jobId}/export?format=html"
                    class="block w-full text-center bg-gray-100 hover:bg-gray-200
                           text-gray-800 font-semibold py-2 px-4 rounded-lg
                           transition duration-200">
