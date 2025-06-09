@@ -1,21 +1,10 @@
 """Tests for task state management."""
 
-from unittest.mock import Mock
-
 import pytest
-from redis import Redis
 
 from src.core.models import TaskProgress, TaskState, TaskStateInfo
-from src.core.state import StateStore
+from src.core.state import state_store
 from tests.conftest import TEST_TIMESTAMP, assert_redis_state
-
-
-@pytest.fixture
-def state_store() -> StateStore:
-    """Create a state store instance."""
-    store = StateStore()
-    store.redis = Mock(spec=Redis)  # Replace Redis instance with mock
-    return store
 
 
 @pytest.fixture
@@ -27,29 +16,23 @@ def job_id() -> str:
 class TestStateStore:
     """Tests for StateStore class."""
 
-    def test_get_state_not_found(
-        self, state_store: StateStore, test_job_id: str
-    ) -> None:
+    def test_get_state_not_found(self, test_job_id: str) -> None:
         """Test getting state for non-existent job."""
         state_store.redis.get.return_value = None
         assert state_store.get_state(test_job_id) is None
 
-    def test_get_state_invalid_json(
-        self, state_store: StateStore, test_job_id: str
-    ) -> None:
+    def test_get_state_invalid_json(self, test_job_id: str) -> None:
         """Test getting state with invalid JSON."""
         state_store.redis.get.return_value = b"invalid json"
         assert state_store.get_state(test_job_id) is None
 
-    def test_set_state(
-        self, state_store: StateStore, mock_state_info: TaskStateInfo
-    ) -> None:
+    def test_set_state(self, mock_state_info: TaskStateInfo) -> None:
         """Test setting state."""
         state_store.set_state(mock_state_info)
         assert_redis_state(state_store.redis, mock_state_info)
 
     def test_update_progress(
-        self, state_store: StateStore, test_job_id: str, mock_progress: TaskProgress
+        self, test_job_id: str, mock_progress: TaskProgress
     ) -> None:
         """Test updating progress."""
         # Initial state doesn't exist
@@ -71,7 +54,7 @@ class TestStateStore:
         assert str(mock_progress.progress) in saved_state
         assert mock_progress.message in saved_state
 
-    def test_set_success(self, state_store: StateStore, test_job_id: str) -> None:
+    def test_set_success(self, test_job_id: str) -> None:
         """Test setting success state."""
         result = {"test": "result"}
         state_store.set_success(test_job_id, result)
@@ -85,7 +68,7 @@ class TestStateStore:
         )
         assert_redis_state(state_store.redis, expected_state)
 
-    def test_set_failure(self, state_store: StateStore, test_job_id: str) -> None:
+    def test_set_failure(self, test_job_id: str) -> None:
         """Test setting failure state."""
         error = "Test error"
         state_store.set_failure(test_job_id, error)
@@ -99,7 +82,7 @@ class TestStateStore:
         )
         assert_redis_state(state_store.redis, expected_state)
 
-    def test_set_retry(self, state_store: StateStore, test_job_id: str) -> None:
+    def test_set_retry(self, test_job_id: str) -> None:
         """Test setting retry state."""
         # Set up existing state with retries
         existing_state = TaskStateInfo(
@@ -124,7 +107,7 @@ class TestStateStore:
         )
         assert_redis_state(state_store.redis, expected_state)
 
-    def test_state_persistence(self, state_store: StateStore, test_job_id: str) -> None:
+    def test_state_persistence(self, test_job_id: str) -> None:
         """Test full state persistence flow."""
         # 1. Start job
         state_store.set_started(test_job_id)

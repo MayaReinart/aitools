@@ -14,7 +14,6 @@ from redis.exceptions import ConnectionError
 
 from celery_worker import celery_app
 from src.core.models import TaskProgress, TaskState, TaskStateInfo
-from src.core.state import StateStore
 from src.core.storage import JobStorage
 from src.services.llm import EndpointAnalysis, SpecAnalysis
 
@@ -63,14 +62,6 @@ def mock_redis() -> Mock:
     redis.get.return_value = None  # Default to no state
     redis.setex.return_value = True  # Default behavior for setting keys
     return redis
-
-
-@pytest.fixture
-def state_store(mock_redis: Mock) -> StateStore:
-    """Create a state store instance with mock Redis."""
-    store = StateStore()
-    store.redis = mock_redis
-    return store
 
 
 @pytest.fixture

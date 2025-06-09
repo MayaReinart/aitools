@@ -7,12 +7,11 @@ from loguru import logger
 
 from src.api.models import validate_spec_file
 from src.core.models import TaskState
-from src.core.state import StateStore
+from src.core.state import state_store
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
 from src.tasks.pipeline import create_processing_chain
 
 router = APIRouter(prefix="/api", tags=["api"])
-state_store = StateStore()
 
 
 def _detect_format(content_type: str | None) -> SpecFormat:
@@ -62,6 +61,9 @@ async def get_summary(job_id: str) -> JSONResponse:
 
     # Check task state first
     state = state_store.get_state(job_id)
+
+    logger.debug(f"[{job_id}] State: {state}")
+
     if not state:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -74,7 +76,8 @@ async def get_summary(job_id: str) -> JSONResponse:
             status_code=status.HTTP_202_ACCEPTED,
             content={
                 "status": state.state.value,
-                "progress": state.progress[-1].model_dump() if state.progress else None,
+                "stage": state.progress[-1].stage if state.progress else None,
+                "progress": state.progress[-1].progress if state.progress else None,
             },
         )
 

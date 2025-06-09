@@ -5,12 +5,10 @@ from typing import Any
 from celery import chain, shared_task
 from loguru import logger
 
-from src.core.state import StateStore
+from src.core.state import state_store
 from src.core.storage import JobStorage
 from src.services.llm import EndpointAnalysis, SpecAnalysis
 from src.services.parser import ParsedSpec, parse_openapi_spec
-
-state_store = StateStore()
 
 
 def update_progress(job_id: str, stage: str, progress: float, message: str) -> None:

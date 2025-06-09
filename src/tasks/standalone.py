@@ -4,9 +4,7 @@ from typing import Any
 
 from celery.signals import task_failure, task_success
 
-from src.core.state import StateStore
-
-state_store = StateStore()
+from src.core.state import state_store
 
 
 @task_success.connect
