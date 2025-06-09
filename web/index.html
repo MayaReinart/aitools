@@ -117,7 +117,7 @@
                     // Update progress if available
                     if (data.progress) {
                         progressBar.style.width = `${data.progress}%`;
-                        statusText.textContent = `Processing: ${data.progress}%`;
+                        statusText.textContent = `Processing: ${data.status} ${data.progress}%`;
                     }
                     // Continue polling
                     setTimeout(() => pollStatus(jobId), 2000);
