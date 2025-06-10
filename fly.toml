@@ -41,17 +41,11 @@ app = "poetry run uvicorn src.main:app --host 0.0.0.0 --port 8080"
     hard_limit = 10
     soft_limit = 5
 
-  [[services.tcp_checks]]
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "10s"
-    restart_limit = 0
-
   [[services.http_checks]]
     interval = "15s"
     timeout = "5s"
     grace_period = "30s"
-    restart_limit = 0
+    restart_limit = 3
     method = "get"
     path = "/healthz"
     protocol = "http"
