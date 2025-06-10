@@ -35,7 +35,11 @@ api_introspection/
 │   ├── core/
 │   │   ├── config.py          # Environment and app configuration
 │   │   ├── storage.py         # Job data storage management
-│   │   └── logging_config.py  # Loguru setup and configuration
+│   │   └── logging/           # Logging package
+│   │       ├── __init__.py    # Package exports
+│   │       ├── config.py      # Logging configuration
+│   │       ├── core.py        # Core logging functionality
+│   │       └── handlers.py    # Custom logging handlers
 │   ├── services/
 │   │   └── openai.py          # OpenAI API integration
 │   └── tasks/
