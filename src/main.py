@@ -3,18 +3,18 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from loguru import Logger
+from loguru import logger  # type: ignore
 
 from src.api.routes import router
-from src.core.logging import get_logger, setup_logging
+from src.core.logging import setup_logging
 
-logger = cast(Logger, get_logger())
+# Set up logging
+setup_logging()
 
 
 @asynccontextmanager
@@ -41,9 +41,6 @@ app.mount("/static", StaticFiles(directory=str(web_dir)), name="static")
 async def read_root() -> FileResponse:
     return FileResponse(str(web_dir / "index.html"))
 
-
-# Set up logging
-setup_logging()
 
 # Include routers
 app.include_router(router)

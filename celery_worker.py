@@ -1,7 +1,7 @@
 """Celery worker configuration."""
 
 from types import TracebackType
-from typing import Any, cast
+from typing import Any
 
 from celery import Task
 from celery.signals import (
@@ -14,16 +14,13 @@ from celery.signals import (
     worker_ready,
 )
 from celery.worker.request import Request
-from loguru import Logger
-
-from src.core.celery_app import celery_app
-from src.core.logging import get_logger, setup_logging
-
-logger = cast(Logger, get_logger())
+from loguru import logger  # type: ignore
 
 # Import tasks to register them
 # Even though it appears unused, this import is necessary
 import src.tasks.pipeline  # noqa
+from src.core.celery_app import celery_app
+from src.core.logging import setup_logging
 
 # Export the Celery app instance
 celery = celery_app

@@ -33,26 +33,28 @@ def _detect_format(content_type: str | None) -> SpecFormat:
 @router.get("/health")
 async def health_check() -> JSONResponse:
     """Check health of service dependencies."""
-    redis_healthy, redis_msg, redis_details = check_redis_connection()
-    celery_healthy, celery_msg, celery_details = check_celery_worker(celery_app)
+    redis_result = check_redis_connection()
+    celery_result = check_celery_worker(celery_app)
 
-    service_status = "healthy" if redis_healthy and celery_healthy else "unhealthy"
+    service_status = (
+        "healthy"
+        if redis_result.is_healthy and celery_result.is_healthy
+        else "unhealthy"
+    )
 
     response_content = {
         "status": service_status,
         "redis": {
-            "healthy": redis_healthy,
-            "message": redis_msg,
-            "details": redis_details,
+            "healthy": redis_result.is_healthy,
+            **redis_result.details,
         },
         "celery": {
-            "healthy": celery_healthy,
-            "message": celery_msg,
-            "details": celery_details,
+            "healthy": celery_result.is_healthy,
+            **celery_result.details,
         },
     }
 
-    if not redis_healthy or not celery_healthy:
+    if not redis_result.is_healthy or not celery_result.is_healthy:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content=response_content,

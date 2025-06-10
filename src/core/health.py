@@ -1,5 +1,6 @@
 """Health check utilities."""
 
+from dataclasses import dataclass
 from typing import Any
 
 from celery import Celery
@@ -10,48 +11,78 @@ from redis.exceptions import ConnectionError, RedisError
 from src.core.config import settings
 
 
-def check_redis_connection() -> tuple[bool, str, dict[str, Any]]:
+@dataclass
+class HealthCheckResult:
+    """Result of a health check."""
+
+    is_healthy: bool
+    details: dict[str, Any]
+
+
+def check_redis_connection(redis_client: Redis | None = None) -> HealthCheckResult:
     """Check Redis connection health."""
-    try:
+    if redis_client is None:
         redis_client = Redis.from_url(settings.REDIS_URL)
+
+    try:
         redis_client.ping()
         info = redis_client.info()
-        return (
-            True,
-            "Redis connection is healthy",
-            {
-                "version": info.get("redis_version", "unknown"),
-                "used_memory": info.get("used_memory_human", "unknown"),
-                "connected_clients": info.get("connected_clients", 0),
+        return HealthCheckResult(
+            is_healthy=True,
+            details={
+                "status": "healthy",
+                "version": info.get("redis_version", "unknown"),  # type: ignore[union-attr]
+                # Item "Awaitable[Any]" of "Awaitable[Any] | Any" has no attribute "get"
             },
         )
     except ConnectionError:
-        return False, "Failed to connect to Redis", {"error": "Connection refused"}
+        return HealthCheckResult(
+            is_healthy=False,
+            details={
+                "status": "unhealthy",
+                "error": "Connection refused",
+            },
+        )
     except RedisError as e:
-        return False, f"Redis error: {e!s}", {"error": str(e)}
+        return HealthCheckResult(
+            is_healthy=False,
+            details={
+                "status": "unhealthy",
+                "error": str(e),
+            },
+        )
 
 
-def check_celery_worker(app: Celery) -> tuple[bool, str, dict[str, Any]]:
+def check_celery_worker(app: Celery) -> HealthCheckResult:
     """Check Celery worker health."""
     try:
         inspect: Inspect = app.control.inspect()
         active = inspect.active()
 
         if not active:
-            return (
-                False,
-                "No Celery workers are running",
-                {"error": "No active workers"},
+            return HealthCheckResult(
+                is_healthy=False,
+                details={
+                    "status": "unhealthy",
+                    "error": "No active workers found",
+                },
             )
 
         worker_count = len(active)
-        return (
-            True,
-            "Celery workers are healthy",
-            {
-                "worker_count": worker_count,
-                "active_tasks": sum(len(tasks) for tasks in active.values()),
+        active_tasks = sum(len(tasks) for tasks in active.values())
+        return HealthCheckResult(
+            is_healthy=True,
+            details={
+                "status": "healthy",
+                "active_workers": worker_count,
+                "active_tasks": active_tasks,
             },
         )
     except Exception as e:
-        return False, f"Failed to check Celery workers: {e!s}", {"error": str(e)}
+        return HealthCheckResult(
+            is_healthy=False,
+            details={
+                "status": "unhealthy",
+                "error": str(e),
+            },
+        )

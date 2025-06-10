@@ -3,14 +3,15 @@
 import logging
 import sys
 from datetime import datetime, timezone
+from typing import Any
 
-from loguru import Logger, logger
+from loguru import logger  # type: ignore
 
 from .config import LogConfig
 from .handlers import InterceptHandler, get_caller_info
 
 
-def get_logger(name: str | None = None) -> Logger:
+def get_logger(name: str | None = None) -> Any:  # noqa: ANN401
     """Get a logger instance.
 
     Args:

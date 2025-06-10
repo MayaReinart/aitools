@@ -17,7 +17,8 @@ def handle_success(
 ) -> None:
     """Handle successful task completion."""
     if isinstance(result, dict) and "job_id" in result:
-        state_store.set_success(result["job_id"], result)
+        job_id = result.pop("job_id")
+        state_store.set_success(job_id, result)
 
 
 @task_failure.connect
