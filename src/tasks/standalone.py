@@ -2,8 +2,10 @@
 
 from typing import Any
 
+from celery.canvas import Signature
 from celery.signals import task_failure, task_success
 
+from src.api.exceptions import BrokerError
 from src.core.state import state_store
 
 
@@ -28,3 +30,12 @@ def handle_failure(
     """Handle task failure."""
     if args and args[0]:  # job_id is first argument
         state_store.set_failure(args[0], str(exception))
+
+
+def verify_broker_connection(chain: Signature) -> None:
+    """Verify broker connection."""
+    try:
+        connection = chain.app.connection()
+        connection.ensure_connection(max_retries=3, interval_start=1)
+    except ConnectionError as e:
+        raise BrokerError() from e
