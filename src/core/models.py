@@ -35,35 +35,86 @@ class DateTimeSerializerMixin(BaseModel):
 class TaskState(str, Enum):
     """Task execution states."""
 
-    PENDING = "PENDING"
-    STARTED = "STARTED"
-    PROGRESS = "PROGRESS"
-    SUCCESS = "SUCCESS"
-    FAILURE = "FAILURE"
-    RETRY = "RETRY"
+    STARTED = "started"
+    PROGRESS = "progress"
+    SUCCESS = "success"
+    FAILURE = "failure"
 
 
-class TaskProgress(DateTimeSerializerMixin):
-    """Task progress information."""
+def _utc_now() -> datetime:
+    """Get current UTC datetime."""
+    return datetime.now(timezone.utc)
+
+
+class ProgressUpdate(DateTimeSerializerMixin):
+    """Task progress update."""
 
     stage: str = Field(..., description="Current processing stage")
     progress: float = Field(..., ge=0, le=100, description="Progress percentage")
-    message: str = Field(..., description="Progress message")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    message: str | None = Field(default=None, description="Progress message")
+    timestamp: datetime = Field(default_factory=_utc_now)
+
+    def __str__(self) -> str:
+        """Return a string representation of the progress update."""
+        return f"""
+ProgressUpdate:
+    stage={self.stage},
+    progress={int(self.progress)},
+    message={self.message},
+    time={self.timestamp.isoformat()})
+"""
+
+    def __repr__(self) -> str:
+        """Return a string representation of the progress update."""
+        return self.__str__()
 
 
-class TaskStateInfo(DateTimeSerializerMixin):
-    """Complete task state information."""
+class TaskStatus(BaseModel):
+    """Task status model."""
 
-    job_id: str = Field(..., description="Unique job identifier")
-    state: TaskState = Field(..., description="Current task state")
-    progress: list[TaskProgress] = Field(
-        default_factory=list, description="Progress history"
-    )
-    result: dict[str, Any] | None = Field(
-        default=None, description="Task result if completed"
-    )
-    error: str | None = Field(default=None, description="Error message if failed")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    job_id: str
+    task_id: str | None = None
+    state: TaskState
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+    progress: list[ProgressUpdate] = Field(default_factory=list)
+    error: str | None = None
+    result: dict[str, Any] | None = None
     retries: int = Field(default=0, description="Number of retries attempted")
+
+    def update_progress(
+        self,
+        stage: str,
+        progress: float,
+        message: str | None = None,
+    ) -> None:
+        """Update task progress."""
+        self.progress.append(
+            ProgressUpdate(stage=stage, progress=progress, message=message)
+        )
+        self.updated_at = _utc_now()
+
+    @property
+    def latest_progress(self) -> ProgressUpdate | None:
+        """Get the latest progress update."""
+        return self.progress[-1] if self.progress else None
+
+    @property
+    def progress_stages(self) -> list[str]:
+        """Get unique stages in progress."""
+        return list({update.stage for update in self.progress})
+
+    @property
+    def stage_progress(self) -> dict[str, float]:
+        """Get progress by stage."""
+        return {
+            stage: next(
+                (
+                    update.progress
+                    for update in reversed(self.progress)
+                    if update.stage == stage
+                ),
+                0.0,
+            )
+            for stage in self.progress_stages
+        }

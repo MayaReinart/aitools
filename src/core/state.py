@@ -1,155 +1,142 @@
-"""Task state management using Redis."""
+"""State management for task execution."""
 
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
+from pydantic import ValidationError
 from redis import Redis
+from redis.exceptions import RedisError
 
 from src.core.config import settings
-from src.core.models import TaskProgress, TaskState, TaskStateInfo
+from src.core.models import TaskState, TaskStatus
+
+
+def _utc_now() -> datetime:
+    """Get current UTC datetime."""
+    return datetime.now(timezone.utc)
 
 
 class StateStore:
-    """Redis-based task state storage."""
+    """Store for task state information."""
+
+    # 24 hours TTL for task states
+    TASK_STATE_TTL = 24 * 60 * 60
 
     def __init__(self) -> None:
-        """Initialize Redis connection."""
-        self.redis = Redis.from_url(settings.REDIS_URL or "redis://localhost:6379/0")
-        self.state_prefix = "task_state:"
-        self.ttl = timedelta(days=7)  # Store task state for 7 days
+        """Initialize the state store."""
+        self.redis = Redis.from_url(settings.REDIS_URL)
 
     def _get_key(self, job_id: str) -> str:
         """Get Redis key for a job."""
-        return f"{self.state_prefix}{job_id}"
+        return f"job:{job_id}"
 
-    def get_state(self, job_id: str) -> TaskStateInfo | None:
-        """Get current state for a job.
-
-        Args:
-            job_id: The job identifier
-
-        Returns:
-            TaskStateInfo if found, None otherwise
-        """
-        key = self._get_key(job_id)
-        data = self.redis.get(key)
-        if not data:
+    def get_state(self, job_id: str) -> TaskStatus | None:
+        """Get the current state of a job."""
+        try:
+            key = self._get_key(job_id)
+            data = self.redis.get(key)
+            if not data:
+                return None
+            return TaskStatus.model_validate_json(data)
+        except (RedisError, ValidationError) as e:
+            logger.error(f"Error getting state for job {job_id}: {e}")
             return None
 
+    def set_state(self, state: TaskStatus) -> None:
+        """Set the state for a job."""
         try:
-            state_dict = json.loads(data)
-            return TaskStateInfo.model_validate(state_dict)
-        except Exception as e:
-            logger.error(f"Error loading state for {job_id}: {e}")
-            return None
+            key = self._get_key(state.job_id)
+            self.redis.setex(key, self.TASK_STATE_TTL, state.model_dump_json())
+        except RedisError as e:
+            logger.error(f"Error setting state for job {state.job_id}: {e}")
 
-    def set_state(self, state: TaskStateInfo) -> None:
-        """Set state for a job.
-
-        Args:
-            state: The state to store
-        """
-        key = self._get_key(state.job_id)
-        state.updated_at = datetime.now(tz=timezone.utc)
-        try:
-            self.redis.setex(
-                key,
-                int(self.ttl.total_seconds()),  # Redis expects seconds as int
-                json.dumps(state.model_dump()),
-            )
-        except Exception as e:
-            logger.error(f"Error saving state for {state.job_id}: {e}")
-
-    def update_progress(
-        self, job_id: str, stage: str, progress: float, message: str
-    ) -> None:
-        """Update progress for a job.
-
-        Args:
-            job_id: The job identifier
-            stage: Current processing stage
-            progress: Progress percentage (0-100)
-            message: Progress message
-        """
+    def set_task_id(self, job_id: str, task_id: str) -> None:
+        """Set the task ID for a job."""
         state = self.get_state(job_id)
         if not state:
-            state = TaskStateInfo(
+            state = TaskStatus(
                 job_id=job_id,
-                state=TaskState.PROGRESS,
+                task_id=task_id,
+                state=TaskState.STARTED,
             )
-
-        state.state = TaskState.PROGRESS
-        state.progress.append(
-            TaskProgress(
-                stage=stage,
-                progress=progress,
-                message=message,
-            )
-        )
+        else:
+            state.task_id = task_id
+            state.updated_at = _utc_now()
         self.set_state(state)
 
     def set_started(self, job_id: str) -> None:
-        """Mark a job as started.
-
-        Args:
-            job_id: The job identifier
-        """
-        state = TaskStateInfo(
+        """Set a job as started."""
+        state = TaskStatus(
             job_id=job_id,
             state=TaskState.STARTED,
         )
         self.set_state(state)
 
     def set_success(self, job_id: str, result: dict[str, Any]) -> None:
-        """Mark a job as successful.
-
-        Args:
-            job_id: The job identifier
-            result: The task result
-        """
+        """Set a job as successful."""
         state = self.get_state(job_id)
         if not state:
-            state = TaskStateInfo(
+            state = TaskStatus(
                 job_id=job_id,
                 state=TaskState.SUCCESS,
+                result=result,
             )
-        state.state = TaskState.SUCCESS
-        state.result = result
+        else:
+            state.state = TaskState.SUCCESS
+            state.result = result
+            state.updated_at = _utc_now()
         self.set_state(state)
 
     def set_failure(self, job_id: str, error: str) -> None:
-        """Mark a job as failed.
-
-        Args:
-            job_id: The job identifier
-            error: Error message
-        """
+        """Set a job as failed."""
         state = self.get_state(job_id)
         if not state:
-            state = TaskStateInfo(
+            state = TaskStatus(
                 job_id=job_id,
                 state=TaskState.FAILURE,
+                error=error,
             )
-        state.state = TaskState.FAILURE
-        state.error = error
+        else:
+            state.state = TaskState.FAILURE
+            state.error = error
+            state.updated_at = _utc_now()
         self.set_state(state)
 
     def set_retry(self, job_id: str, error: str) -> None:
-        """Mark a job for retry.
-
-        Args:
-            job_id: The job identifier
-            error: Error message
-        """
+        """Set a job as retried, incrementing retry count."""
         state = self.get_state(job_id)
         if not state:
-            state = TaskStateInfo(
+            state = TaskStatus(
                 job_id=job_id,
-                state=TaskState.RETRY,
+                state=TaskState.FAILURE,
+                error=error,
+                retries=1,
             )
-        state.state = TaskState.RETRY
-        state.error = error
-        state.retries += 1
+        else:
+            state.state = TaskState.FAILURE
+            state.error = error
+            state.retries += 1
+            state.updated_at = _utc_now()
         self.set_state(state)
+
+    def update_progress(
+        self,
+        job_id: str,
+        stage: str,
+        progress: float,
+        message: str | None = None,
+    ) -> None:
+        """Update progress for a job."""
+        state = self.get_state(job_id)
+        if not state:
+            state = TaskStatus(
+                job_id=job_id,
+                state=TaskState.PROGRESS,
+            )
+        state.update_progress(stage, progress, message)
+        self.set_state(state)
+
+
+# Global state store instance
+state_store = StateStore()

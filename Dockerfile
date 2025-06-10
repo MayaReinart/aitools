@@ -1,5 +1,5 @@
 # Use Python 3.11 as base image
-FROM python:3.11-slim
+FROM python:3.11-slim as base
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -18,6 +18,7 @@ RUN curl -sSL https://install.python-poetry.org | POETRY_HOME=/opt/poetry POETRY
 # Copy project files
 COPY pyproject.toml poetry.lock ./
 COPY src/ src/
+COPY web/ web/
 
 # Configure Poetry and install dependencies
 RUN poetry config virtualenvs.create false \

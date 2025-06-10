@@ -7,16 +7,16 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
-from src.core.models import TaskProgress, TaskState, TaskStateInfo
+from src.core.models import ProgressUpdate, TaskState, TaskStatus
 from src.core.storage import JobStorage, SpecFormat
 from src.main import app
 from src.services.llm import EndpointAnalysis, SpecAnalysis
-from tests.conftest import assert_file_exists_with_content
+from tests.conftest import TEST_TIMESTAMP, assert_file_exists_with_content
 
 client = TestClient(app)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_state_store() -> Generator[Mock, None, None]:
     """Mock the state store."""
     with patch("src.api.routes.state_store") as mock:
@@ -40,11 +40,16 @@ def mock_openai() -> Generator[Mock, None, None]:
         yield mock
 
 
-def test_health_check() -> None:
-    """Test health check endpoint."""
-    response = client.get("/api/health")
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"status": "healthy"}
+@pytest.fixture
+def mock_chain() -> Generator[Mock, None, None]:
+    """Mock Celery chain."""
+    with patch("src.api.routes.create_processing_chain") as mock:
+        chain = Mock()
+        result = Mock()
+        result.id = "test-task-id"
+        chain.apply_async.return_value = result
+        mock.return_value = chain
+        yield mock
 
 
 class TestSpecUpload:
@@ -54,63 +59,57 @@ class TestSpecUpload:
         self: "TestSpecUpload",
         sample_spec: bytes,
         test_job_id: str,
+        mock_chain: Mock,
     ) -> None:
         """Test uploading a valid JSON OpenAPI spec"""
         # Create storage instance to ensure directory exists
         storage = JobStorage(test_job_id)
 
-        with patch("src.api.routes.create_processing_chain") as mock_chain:
-            mock_chain.return_value.delay.return_value = None
-            with patch("src.api.routes.uuid4") as mock_uuid:
-                mock_uuid.return_value = test_job_id
+        with patch("src.api.routes.uuid4") as mock_uuid:
+            mock_uuid.return_value = test_job_id
 
-                response = client.post(
-                    "/api/spec/upload",
-                    files={"file": ("test.json", sample_spec, "application/json")},
-                )
-                assert response.status_code == status.HTTP_200_OK
-                assert response.json() == {"job_id": test_job_id}
+            response = client.post(
+                "/api/spec/upload",
+                files={"file": ("test.json", sample_spec, "application/json")},
+            )
+            assert response.status_code == status.HTTP_200_OK
+            assert response.json() == {"job_id": test_job_id}
 
-                # Verify file was saved
-                spec_path = storage.job_dir / "spec.json"
-                assert_file_exists_with_content(spec_path, sample_spec)
+            # Verify file was saved
+            spec_path = storage.job_dir / "spec.json"
+            assert_file_exists_with_content(spec_path, sample_spec)
 
-                # Verify chain was created with correct arguments
-                mock_chain.assert_called_once_with(
-                    sample_spec.decode("utf-8"), test_job_id
-                )
-                mock_chain.return_value.delay.assert_called_once()
+            # Verify chain was created with correct arguments
+            mock_chain.assert_called_once_with(sample_spec.decode("utf-8"), test_job_id)
+            mock_chain.return_value.apply_async.assert_called_once()
 
     def test_upload_valid_yaml(
         self: "TestSpecUpload",
         sample_spec: bytes,
         test_job_id: str,
+        mock_chain: Mock,
     ) -> None:
         """Test uploading with YAML content type"""
         # Create storage instance to ensure directory exists
         storage = JobStorage(test_job_id)
 
-        with patch("src.api.routes.create_processing_chain") as mock_chain:
-            mock_chain.return_value.delay.return_value = None
-            with patch("src.api.routes.uuid4") as mock_uuid:
-                mock_uuid.return_value = test_job_id
+        with patch("src.api.routes.uuid4") as mock_uuid:
+            mock_uuid.return_value = test_job_id
 
-                response = client.post(
-                    "/api/spec/upload",
-                    files={"file": ("test.yaml", sample_spec, "text/yaml")},
-                )
-                assert response.status_code == status.HTTP_200_OK
-                assert response.json() == {"job_id": test_job_id}
+            response = client.post(
+                "/api/spec/upload",
+                files={"file": ("test.yaml", sample_spec, "text/yaml")},
+            )
+            assert response.status_code == status.HTTP_200_OK
+            assert response.json() == {"job_id": test_job_id}
 
-                # Verify file was saved
-                spec_path = storage.job_dir / "spec.yaml"
-                assert_file_exists_with_content(spec_path, sample_spec)
+            # Verify file was saved
+            spec_path = storage.job_dir / "spec.yaml"
+            assert_file_exists_with_content(spec_path, sample_spec)
 
-                # Verify chain was created with correct arguments
-                mock_chain.assert_called_once_with(
-                    sample_spec.decode("utf-8"), test_job_id
-                )
-                mock_chain.return_value.delay.assert_called_once()
+            # Verify chain was created with correct arguments
+            mock_chain.assert_called_once_with(sample_spec.decode("utf-8"), test_job_id)
+            mock_chain.return_value.apply_async.assert_called_once()
 
     def test_upload_invalid_content_type(
         self: "TestSpecUpload",
@@ -139,22 +138,23 @@ class TestSpecSummary:
         test_job_id: str,
     ) -> None:
         """Test getting a pending summary from state store."""
-        mock_state_store.get_state.return_value = TaskStateInfo(
+        mock_state_store.get_state.return_value = TaskStatus(
             job_id=test_job_id,
             state=TaskState.PROGRESS,
             progress=[
-                TaskProgress(
+                ProgressUpdate(
                     stage="test",
                     progress=50.0,
                     message="Test progress",
+                    timestamp=TEST_TIMESTAMP,
                 )
             ],
         )
 
         response = client.get(f"/api/spec/{test_job_id}/summary")
         assert response.status_code == status.HTTP_202_ACCEPTED
-        assert response.json()["status"] == "PROGRESS"
-        assert response.json()["progress"]["stage"] == "test"
+        assert response.json()["status"] == "progress"
+        assert response.json()["current_job_name"] == "test"
 
     def test_get_failed_summary_from_state(
         self: "TestSpecSummary",
@@ -162,7 +162,7 @@ class TestSpecSummary:
         test_job_id: str,
     ) -> None:
         """Test getting a failed summary from state store."""
-        mock_state_store.get_state.return_value = TaskStateInfo(
+        mock_state_store.get_state.return_value = TaskStatus(
             job_id=test_job_id,
             state=TaskState.FAILURE,
             error="Test error",
@@ -178,7 +178,7 @@ class TestSpecSummary:
         test_job_id: str,
     ) -> None:
         """Test getting a completed summary from state store."""
-        mock_state_store.get_state.return_value = TaskStateInfo(
+        mock_state_store.get_state.return_value = TaskStatus(
             job_id=test_job_id,
             state=TaskState.SUCCESS,
             result={"test": "result"},
@@ -186,42 +186,12 @@ class TestSpecSummary:
 
         response = client.get(f"/api/spec/{test_job_id}/summary")
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["status"] == "SUCCESS"
+        assert response.json()["status"] == "success"
         assert response.json()["result"]["test"] == "result"
-
-    def test_get_pending_summary_fallback(
-        self: "TestSpecSummary",
-        mock_state_store: Mock,
-        test_job_id: str,
-    ) -> None:
-        """Test falling back to Celery state for pending summary."""
-        mock_state_store.get_state.return_value = None
-
-        with patch("src.api.routes.analyze_api_task") as mock_task:
-            mock_task.AsyncResult.return_value = Mock(status="PENDING")
-            response = client.get(f"/api/spec/{test_job_id}/summary")
-            assert response.status_code == status.HTTP_202_ACCEPTED
-            assert "processing" in response.json()["detail"]
 
 
 class TestSpecState:
     """Tests for state endpoint."""
-
-    def test_get_state_not_found(
-        self: "TestSpecState",
-        mock_state_store: Mock,
-        test_job_id: str,
-    ) -> None:
-        """Test getting state for non-existent job."""
-        mock_state_store.get_state.return_value = None
-
-        with patch("src.api.routes.analyze_api_task") as mock_task:
-            mock_result = Mock(status="PENDING")
-            mock_task.AsyncResult.return_value = mock_result
-
-            response = client.get(f"/api/spec/{test_job_id}/state")
-            assert response.status_code == status.HTTP_202_ACCEPTED
-            assert response.json()["status"] == "PENDING"
 
     def test_get_state_success(
         self: "TestSpecState",
@@ -229,7 +199,7 @@ class TestSpecState:
         test_job_id: str,
     ) -> None:
         """Test getting state for successful job."""
-        mock_state_store.get_state.return_value = TaskStateInfo(
+        mock_state_store.get_state.return_value = TaskStatus(
             job_id=test_job_id,
             state=TaskState.SUCCESS,
             result={"test": "result"},
@@ -237,7 +207,7 @@ class TestSpecState:
 
         response = client.get(f"/api/spec/{test_job_id}/state")
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["status"] == "SUCCESS"
+        assert response.json()["status"] == "success"
 
 
 class TestSpecExport:

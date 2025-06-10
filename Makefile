@@ -1,4 +1,4 @@
-.PHONY: all test run celery dev clean pc fix
+.PHONY: all test run celery dev clean pc fix check-web
 
 all: pc
 
@@ -25,7 +25,12 @@ dev: clean redis
 	make run & \
 	make celery
 
-pc:
+check-web:
+	@echo "Checking web files exist..."
+	@test -d web || (echo "web directory not found" && exit 1)
+	@test -f web/index.html || (echo "web/index.html not found" && exit 1)
+
+pc: check-web
 	poetry run ruff check .
 	poetry run ruff format --check .
 	poetry run mypy src
