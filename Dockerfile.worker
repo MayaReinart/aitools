@@ -36,9 +36,13 @@ COPY . .
 # Install the application
 RUN poetry install --no-interaction --no-ansi --only main
 
-# Add healthcheck for the worker
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD poetry run celery -A src.tasks.celery_worker inspect ping -d celery@$HOSTNAME || exit 1
+# Create a non-root user
+RUN useradd -m -u 1500 worker
+USER worker
 
-# Run the Celery worker
-CMD ["poetry", "run", "celery", "-A", "src.tasks.celery_worker", "worker", "--loglevel=info"]
+# Add Celery-specific healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD poetry run celery -A src.tasks.celery_worker inspect ping || exit 1
+
+# Run the Celery worker with proper settings for fly.io
+CMD ["poetry", "run", "celery", "-A", "src.tasks.celery_worker", "worker", "--loglevel=info", "--concurrency=2", "--uid=1500"]

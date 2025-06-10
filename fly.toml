@@ -26,6 +26,9 @@ app = "poetry run uvicorn src.main:app --host 0.0.0.0 --port 8080"
   internal_port = 8080
   processes = ["app"]
   min_machines_running = 1
+  auto_stop_machines = false
+  auto_start_machines = true
+  restart_limit = 0
 
   [[services.ports]]
     port = 80
@@ -52,3 +55,4 @@ app = "poetry run uvicorn src.main:app --host 0.0.0.0 --port 8080"
 
 [deploy]
   strategy = "immediate"
+  release_command = "echo 'API starting...'"
