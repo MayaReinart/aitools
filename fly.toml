@@ -7,6 +7,9 @@ primary_region = "lax"
 [env]
   PORT = "8080"
   PYTHONUNBUFFERED = "1"
+  ENV = "production"
+  LOG_LEVEL = "INFO"
+  # REDIS_URL will be automatically set when you attach Redis
 
 # Specify minimal VM size
 [processes]
@@ -39,13 +42,13 @@ app = "poetry run uvicorn src.main:app --host 0.0.0.0 --port 8080"
     soft_limit = 5
 
   [[services.http_checks]]
-    interval = "30s"
-    timeout = "10s"
-    grace_period = "120s"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
     restart_limit = 3
     method = "get"
-    path = "/api/health"
+    path = "/healthz"
     protocol = "http"
 
 [deploy]
-  strategy = "bluegreen"
+  strategy = "immediate"

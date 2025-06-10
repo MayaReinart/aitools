@@ -42,6 +42,13 @@ async def read_root() -> FileResponse:
     return FileResponse(str(web_dir / "index.html"))
 
 
+# Add a simple health check that doesn't depend on external services
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    """Basic health check endpoint."""
+    return {"status": "healthy"}
+
+
 # Include routers
 app.include_router(router)
 
