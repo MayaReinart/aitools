@@ -1,5 +1,15 @@
 """Task package for API processing."""
 
-from src.tasks.pipeline import create_processing_chain
+from src.tasks.pipeline import (
+    analyze_spec_task,
+    create_processing_chain,
+    generate_outputs_task,
+    parse_spec_task,
+)
 
-__all__ = ["create_processing_chain"]
+__all__ = [
+    "analyze_spec_task",
+    "create_processing_chain",
+    "generate_outputs_task",
+    "parse_spec_task",
+]
