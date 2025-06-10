@@ -36,12 +36,9 @@ COPY . .
 # Install the application
 RUN poetry install --no-interaction --no-ansi --only main
 
-# Expose the port fly.io expects
-EXPOSE 8080
-
-# Add healthcheck
+# Add healthcheck for the worker
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD poetry run celery -A src.tasks.celery_worker inspect ping -d celery@$HOSTNAME || exit 1
 
-# Run the application
-CMD ["poetry", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run the Celery worker
+CMD ["poetry", "run", "celery", "-A", "src.tasks.celery_worker", "worker", "--loglevel=info"]

@@ -1,0 +1,54 @@
+app = "api-introspection"
+primary_region = "lax"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  PYTHONUNBUFFERED = "1"
+
+# Specify minimal VM size
+[processes]
+app = "poetry run uvicorn src.main:app --host 0.0.0.0 --port 8080"
+
+# Use shared CPU
+[vm]
+  cpu_kind = "shared"
+  cpu_shares = 1
+  memory_mb = 256
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["app"]
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 10
+    soft_limit = 5
+
+  [[services.tcp_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    restart_limit = 0
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    restart_limit = 0
+    method = "get"
+    path = "/api/health"
+    protocol = "http"
