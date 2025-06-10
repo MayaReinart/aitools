@@ -29,6 +29,9 @@ primary_region = "lax"
 
   [[services.tcp_checks]]
     interval = "30s"
-    timeout = "5s"
-    grace_period = "10s"
-    restart_limit = 0
+    timeout = "10s"
+    grace_period = "120s"
+    restart_limit = 3
+
+[deploy]
+  strategy = "bluegreen"
