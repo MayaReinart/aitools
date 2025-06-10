@@ -1,4 +1,9 @@
+from typing import Any
+
 from fastapi import HTTPException, UploadFile, status
+from pydantic import BaseModel
+
+from src.core.models import TaskState
 
 CONTENT_TYPES = [
     "application/json",
@@ -24,3 +29,10 @@ def validate_spec_file(file: UploadFile) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported file type. Please upload a JSON or YAML file.",
         )
+
+
+class SummaryResponse(BaseModel):
+    status: TaskState
+    current_job_name: str | None = None
+    current_job_progress: float | None = None
+    result: dict[str, Any] | None = None
