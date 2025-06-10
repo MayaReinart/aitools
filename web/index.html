@@ -107,20 +107,29 @@
                 const response = await fetch(`/api/spec/${jobId}/summary`);
                 const data = await response.json();
 
-                if (data.status === 'completed') {
-                    showResults(jobId);
-                    statusDisplay.classList.add('hidden');
-                } else if (data.status === 'failed') {
+                // Update progress if available
+                if (data.current_job_name && typeof data.current_job_progress === 'number') {
+                    progressBar.style.width = `${data.current_job_progress}%`;
+                    statusText.textContent = `Processing: ${data.current_job_name} ${data.current_job_progress}%`;
+                }
+
+                if (data.status === 'success' && data.result) {
+                    // Stop polling and show results
+                    try {
+                        showResults(jobId, data.result);
+                        statusDisplay.classList.add('hidden');
+                    } catch (error) {
+                        showError('Invalid result format received. Please try again.');
+                        statusDisplay.classList.add('hidden');
+                    }
+                    return; // Exit polling loop
+                } else if (data.status === 'failure' || response.status === 500) {
                     showError('Processing failed. Please try again.');
                     statusDisplay.classList.add('hidden');
+                    return; // Exit polling loop
                 } else {
-                    // Update progress if available
-                    if (data.progress) {
-                        progressBar.style.width = `${data.progress}%`;
-                        statusText.textContent = `Processing: ${data.status} ${data.progress}%`;
-                    }
-                    // Continue polling
-                    setTimeout(() => pollStatus(jobId), 2000);
+                    // Continue polling for non-terminal states
+                    setTimeout(() => pollStatus(jobId), 10000);
                 }
             } catch (error) {
                 showError('Failed to check status. Please try again.');
@@ -128,21 +137,69 @@
             }
         }
 
-        function showResults(jobId) {
+        function showResults(jobId, result) {
             resultsSection.classList.remove('hidden');
+
+            // Display API summary
+            const summaryContent = document.createElement('div');
+            summaryContent.className = 'mb-8 p-4 bg-white rounded-lg shadow';
+
+            // Safely access nested properties from result.analysis
+            const analysis = result.analysis || {};
+            const apiInfo = analysis.spec_info || {};
+            const summary = analysis.summary || {};
+            const endpoints = analysis.endpoints || [];
+
+            summaryContent.innerHTML = `
+                <h2 class="text-2xl font-bold mb-4">${apiInfo.title || 'Untitled API'} ${apiInfo.version ? `v${apiInfo.version}` : ''}</h2>
+                <p class="text-gray-600 mb-6">${apiInfo.description || 'No description available'}</p>
+
+                <div class="mb-6">
+                    <h3 class="text-xl font-semibold mb-3">Overview</h3>
+                    <p class="text-gray-700">${summary.overview || 'No overview available'}</p>
+                </div>
+
+                <div class="mb-6">
+                    <h3 class="text-xl font-semibold mb-3">Endpoints</h3>
+                    <div class="space-y-4">
+                        ${endpoints.map(endpoint => `
+                            <div class="p-3 bg-gray-50 rounded">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm font-mono">${endpoint.method || 'UNKNOWN'}</span>
+                                    <span class="font-mono">${endpoint.path || '/'}</span>
+                                </div>
+                                <p class="text-gray-600">${endpoint.description || endpoint.summary || 'No description available'}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+            // Insert summary before download links
+            resultsSection.insertBefore(summaryContent, downloadLinks);
+
+            // Download links
             downloadLinks.innerHTML = `
-                <a href="/api/spec/${jobId}/export?format=markdown"
-                   class="block w-full text-center bg-gray-100 hover:bg-gray-200
-                          text-gray-800 font-semibold py-2 px-4 rounded-lg
-                          transition duration-200">
-                    Download Markdown
-                </a>
-                <a href="/api/spec/${jobId}/export?format=html"
-                   class="block w-full text-center bg-gray-100 hover:bg-gray-200
-                          text-gray-800 font-semibold py-2 px-4 rounded-lg
-                          transition duration-200">
-                    Download HTML
-                </a>
+                <div class="flex gap-4 justify-center">
+                    <a href="/api/spec/${jobId}/export?format=markdown"
+                       class="flex-1 text-center bg-gray-100 hover:bg-gray-200
+                              text-gray-800 font-semibold py-2 px-4 rounded-lg
+                              transition duration-200">
+                        Download Markdown
+                    </a>
+                    <a href="/api/spec/${jobId}/export?format=html"
+                       class="flex-1 text-center bg-gray-100 hover:bg-gray-200
+                              text-gray-800 font-semibold py-2 px-4 rounded-lg
+                              transition duration-200">
+                        Download HTML
+                    </a>
+                    <a href="/api/spec/${jobId}/export?format=docx"
+                       class="flex-1 text-center bg-gray-100 hover:bg-gray-200
+                              text-gray-800 font-semibold py-2 px-4 rounded-lg
+                              transition duration-200">
+                        Download DOCX
+                    </a>
+                </div>
             `;
         }
 
