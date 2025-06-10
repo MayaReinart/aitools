@@ -3,17 +3,19 @@
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
+import redis.asyncio as redis
 from fastapi import UploadFile
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.completion_usage import CompletionUsage
 from redis import Redis
 from redis.exceptions import ConnectionError
 
-from celery_worker import celery_app
-from src.core.models import TaskProgress, TaskState, TaskStateInfo
+from src.core.celery_app import celery_app
+from src.core.models import ProgressUpdate, TaskState, TaskStatus
+from src.core.state import state_store
 from src.core.storage import JobStorage
 from src.services.llm import EndpointAnalysis, SpecAnalysis
 
@@ -64,10 +66,17 @@ def mock_redis() -> Mock:
     return redis
 
 
+@pytest.fixture(autouse=True)
+def patch_redis(mock_redis: Mock) -> None:
+    """Patch Redis instance in state store."""
+    with patch.object(state_store, "redis", mock_redis):
+        yield
+
+
 @pytest.fixture
-def mock_state_info(test_job_id: str) -> TaskStateInfo:
-    """Create a mock task state info."""
-    return TaskStateInfo(
+def mock_state_info(test_job_id: str) -> TaskStatus:
+    """Create a mock task state."""
+    return TaskStatus(
         job_id=test_job_id,
         state=TaskState.SUCCESS,
         result={"test": "result"},
@@ -77,24 +86,24 @@ def mock_state_info(test_job_id: str) -> TaskStateInfo:
 
 
 def assert_redis_state(
-    redis_mock: Mock,
-    expected_state: TaskStateInfo | None,
-    key_prefix: str = "task_state:",
+    redis_client: redis.Redis,
+    expected_state: TaskStatus | None,
+    key_prefix: str = "job:",
 ) -> None:
     """Assert Redis state was set correctly.
 
     Args:
-        redis_mock: Mock Redis instance
+        redis_client: Redis client
         expected_state: Expected state or None
         key_prefix: Redis key prefix
     """
     if expected_state is None:
-        redis_mock.setex.assert_not_called()
+        redis_client.setex.assert_not_called()
         return
 
-    assert redis_mock.setex.call_count > 0, "Expected Redis setex to be called"
+    assert redis_client.setex.call_count > 0, "Expected Redis setex to be called"
     # Get the most recent call
-    last_call = redis_mock.setex.call_args
+    last_call = redis_client.setex.call_args
     key = f"{key_prefix}{expected_state.job_id}"
     assert last_call[0][0] == key
     saved_state = last_call[0][2]
@@ -125,9 +134,9 @@ def mock_storage(test_job_id: str) -> Mock:
 
 
 @pytest.fixture
-def mock_progress() -> TaskProgress:
-    """Create a mock task progress."""
-    return TaskProgress(
+def mock_progress() -> ProgressUpdate:
+    """Create a mock progress update."""
+    return ProgressUpdate(
         stage="test",
         progress=50.0,
         message="Test progress",

@@ -48,7 +48,7 @@ class TestAnalyzeAPITask:
 
         # Verify state was saved in Redis
         redis = Redis.from_url("redis://localhost:6379/0")
-        key = f"task_state:{test_job_id}"
+        key = f"job:{test_job_id}"
         saved_state = redis.get(key)
         assert saved_state is not None
         state_data = json.loads(saved_state)
