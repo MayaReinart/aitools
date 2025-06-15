@@ -178,6 +178,70 @@
             // Insert summary before download links
             resultsSection.insertBefore(summaryContent, downloadLinks);
 
+            // Add query interface
+            const queryInterface = document.createElement('div');
+            queryInterface.className = 'mb-8 p-4 bg-white rounded-lg shadow';
+            queryInterface.innerHTML = `
+                <h3 class="text-xl font-semibold mb-4">Ask Questions About Your API</h3>
+                <div class="space-y-4">
+                    <textarea id="queryInput"
+                            class="w-full p-2 border rounded-lg"
+                            rows="3"
+                            placeholder="Ask a question about your API spec..."></textarea>
+                    <div class="flex justify-end">
+                        <button id="askButton"
+                                class="bg-blue-600 text-white py-2 px-4 rounded-lg
+                                       hover:bg-blue-700 transition duration-200">
+                            Ask
+                        </button>
+                    </div>
+                    <div id="queryAnswer" class="hidden mt-4 p-4 bg-gray-50 rounded-lg">
+                        <h4 class="font-semibold mb-2">Answer:</h4>
+                        <p id="answerText" class="text-gray-700"></p>
+                    </div>
+                </div>
+            `;
+            resultsSection.insertBefore(queryInterface, downloadLinks);
+
+            // Add query functionality
+            const queryInput = document.getElementById('queryInput');
+            const askButton = document.getElementById('askButton');
+            const queryAnswer = document.getElementById('queryAnswer');
+            const answerText = document.getElementById('answerText');
+
+            askButton.addEventListener('click', async () => {
+                const query = queryInput.value.trim();
+                if (!query) return;
+
+                askButton.disabled = true;
+                askButton.textContent = 'Asking...';
+                queryAnswer.classList.add('hidden');
+
+                try {
+                    const response = await fetch(`/api/spec/${jobId}/query`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ query }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to get answer');
+                    }
+
+                    const data = await response.json();
+                    answerText.textContent = data.answer;
+                    queryAnswer.classList.remove('hidden');
+                } catch (error) {
+                    answerText.textContent = 'Failed to get answer. Please try again.';
+                    queryAnswer.classList.remove('hidden');
+                } finally {
+                    askButton.disabled = false;
+                    askButton.textContent = 'Ask';
+                }
+            });
+
             // Download links
             downloadLinks.innerHTML = `
                 <div class="flex gap-4 justify-center">
