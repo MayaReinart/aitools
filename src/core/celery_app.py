@@ -36,5 +36,15 @@ celery_app.conf.update(
     task_default_routing_key="api_introspection",  # Default routing key
 )
 
+# Disable retries in development
+if settings.ENV.lower() == "dev":
+    logger.info("Development environment detected - disabling task retries")
+    celery_app.conf.update(
+        task_acks_late=True,  # Only acknowledge task after it's completed
+        task_reject_on_worker_lost=True,  # Reject task if worker dies
+        task_default_retry_delay=0,  # No delay between retries
+        task_max_retries=0,  # No retries
+    )
+
 # Import tasks module to ensure tasks are registered
 import src.tasks.pipeline  # noqa
