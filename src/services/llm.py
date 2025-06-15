@@ -1,6 +1,6 @@
 """OpenAI integration for API analysis."""
 
-from llama_index import Document, VectorStoreIndex  # type: ignore
+from llama_index.core import Document, VectorStoreIndex  # type: ignore
 from loguru import logger
 from openai import OpenAI
 from openai.types.chat import (
@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from src.core.config import settings
 from src.services.parser import ParsedSpec
-from src.services.prompts import format_spec_for_analysis
+from src.services.prompts import create_endpoint_prompt, create_overview_prompt
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -51,22 +51,22 @@ def get_llm_spec_analysis(
     Returns:
         dict: Analysis results including overview and endpoint details
     """
-    spec_analysis = format_spec_for_analysis(spec)
-
     # Generate API overview
     logger.info("Generating API overview")
-    overview = _get_completion(spec_analysis["overview"], config)
+    overview_prompt = create_overview_prompt(spec)
+    overview = _get_completion(overview_prompt, config)
 
     # Analyze each endpoint
     logger.info("Analyzing endpoints")
     endpoint_analyses: list[EndpointAnalysis] = []
-    for endpoint in spec_analysis["endpoints"]:
-        logger.info(f"Analyzing endpoint: {endpoint['method']} {endpoint['path']}")
-        endpoint_analysis = _get_completion(endpoint["analysis"], config)
+    for endpoint in spec.endpoints:
+        logger.info(f"Analyzing endpoint: {endpoint.method} {endpoint.path}")
+        endpoint_prompt = create_endpoint_prompt(endpoint)
+        endpoint_analysis = _get_completion(endpoint_prompt, config)
         endpoint_analyses.append(
             EndpointAnalysis(
-                path=endpoint["path"],
-                method=endpoint["method"],
+                path=endpoint.path,
+                method=endpoint.method,
                 analysis=endpoint_analysis,
             )
         )

@@ -1,128 +1,108 @@
-"""Prompt templates for LLM-based API analysis."""
+"""Prompt templates for LLM analysis."""
 
-from typing import Any
-
-from src.services.parser import ParsedEndpoint, ParsedSpec
+from src.services.models import ParsedEndpoint, ParsedSpec
 
 
 def create_overview_prompt(spec: ParsedSpec) -> str:
-    """Create a prompt for generating an API overview.
+    """Create a prompt for API overview analysis.
 
     Args:
         spec: The parsed OpenAPI specification
 
     Returns:
-        str: A prompt for the LLM to generate an overview
+        Formatted prompt for overview analysis
     """
-    return f"""You are an expert API documentation writer.
-    Analyze this API specification and provide a clear, concise overview.
+    return f"""Analyze this API specification and provide a comprehensive overview.
 
-API Details:
-- Title: {spec.title}
-- Version: {spec.version}
-- Description: {spec.description or "No description provided"}
+API: {spec.title} (v{spec.version})
+Description: {spec.description or 'No description provided'}
 
-Total Endpoints: {len(spec.endpoints)}
-
-Write a professional summary that covers:
-1. The main purpose and functionality of this API
-2. Key features and capabilities
-3. Notable patterns in the endpoint design
-4. Any important technical requirements or considerations
-
-Keep the summary clear, technical, and focused on what developers need to know."""
-
-
-def create_endpoint_prompt(endpoint: ParsedEndpoint) -> str:
-    """Create a prompt for analyzing a single endpoint.
-
-    Args:
-        endpoint: The parsed endpoint data
-
-    Returns:
-        str: A prompt for the LLM to analyze the endpoint
-    """
-    # Format parameters
-    params = "\n".join(
-        f"- {p.name} ({p.location}): "
-        f"{'Required' if p.required else 'Optional'}, "
-        f"Type: {p.api_schema.type if p.api_schema else 'unspecified'}"
-        + (f"\n  Description: {p.description}" if p.description else "")
-        for p in endpoint.parameters
-    )
-
-    # Format request body
-    request_body = "No request body"
-    if endpoint.request_body:
-        rb = endpoint.request_body
-        request_body = (
-            f"Content-Type: {rb.content_type}\n"
-            f"Required: {rb.required}\n"
-            + (f"Description: {rb.description}\n" if rb.description else "")
-            + (
-                f"Schema Type: {rb.api_schema.type}"
-                if rb.api_schema
-                else "No schema provided"
-            )
-        )
-
-    # Format responses
-    responses = "\n".join(
-        f"- {code}: "
-        + (f"{resp.description}" if resp.description else "No description")
-        + (f"\n  Content-Type: {resp.content_type}" if resp.content_type else "")
-        + (
-            f"\n  Schema Type: {resp.api_schema.type}"
-            if resp.api_schema
-            else "No schema provided"
-        )
-        for code, resp in sorted(endpoint.responses.items())
-    )
-
-    return f"""Analyze this API endpoint and provide a clear technical description.
-
-Endpoint: {endpoint.method} {endpoint.path}
-Summary: {endpoint.summary or "No summary provided"}
-Description: {endpoint.description or "No description provided"}
-
-Parameters:
-{params or "No parameters"}
-
-Request Body:
-{request_body}
-
-Responses:
-{responses or "No documented responses"}
+Endpoints:
+{_format_endpoints(spec.endpoints)}
 
 Provide:
-1. A clear explanation of what this endpoint does
-2. Input requirements:
-   - URL parameters and their usage
-   - Request body structure (if applicable)
-3. Expected responses for different status codes
-4. Error conditions and how to handle them
-5. Any important implementation notes or best practices
+1. A high-level overview of the API's purpose and functionality
+2. Key features and capabilities
+3. Common use cases
+4. Notable patterns or conventions
+5. Potential integration considerations
 
 Keep the description technical and focused on usage."""
 
 
-def format_spec_for_analysis(spec: ParsedSpec) -> dict[str, Any]:
-    """Format the parsed spec into a structure for LLM analysis.
+def create_endpoint_prompt(endpoint: ParsedEndpoint) -> str:
+    """Create a prompt for endpoint analysis.
 
     Args:
-        spec: The parsed OpenAPI specification
+        endpoint: The parsed endpoint information
 
     Returns:
-        dict: A structured format for LLM consumption
+        Formatted prompt for endpoint analysis
     """
-    return {
-        "overview": create_overview_prompt(spec),
-        "endpoints": [
-            {
-                "path": endpoint.path,
-                "method": endpoint.method,
-                "analysis": create_endpoint_prompt(endpoint),
-            }
-            for endpoint in spec.endpoints
-        ],
-    }
+    return f"""Analyze this API endpoint and provide detailed documentation.
+
+{_format_endpoint(endpoint)}
+
+Provide:
+1. Purpose and functionality
+2. Request/response patterns
+3. Error handling
+4. Security considerations
+5. Integration examples
+
+Keep the description technical and focused on usage."""
+
+
+def _format_endpoints(endpoints: list[ParsedEndpoint]) -> str:
+    """Format a list of endpoints for prompt inclusion.
+
+    Args:
+        endpoints: List of parsed endpoints
+
+    Returns:
+        Formatted string of endpoints
+    """
+    return "\n".join(_format_endpoint(endpoint) for endpoint in endpoints)
+
+
+def _format_endpoint(endpoint: ParsedEndpoint) -> str:
+    """Format a single endpoint for prompt inclusion.
+
+    Args:
+        endpoint: The parsed endpoint information
+
+    Returns:
+        Formatted string of endpoint details
+    """
+    lines = [
+        f"\n{endpoint.method} {endpoint.path}",
+        f"Summary: {endpoint.summary or 'No summary provided'}",
+    ]
+
+    if endpoint.description:
+        lines.append(f"Description: {endpoint.description}")
+
+    if endpoint.parameters:
+        lines.append("\nParameters:")
+        for param in endpoint.parameters:
+            lines.append(
+                f"- {param.name} ({param.location})"
+                f"{' (required)' if param.required else ''}"
+            )
+            if param.description:
+                lines.append(f"  {param.description}")
+
+    if endpoint.request_body:
+        lines.append("\nRequest Body:")
+        lines.append(f"Content Type: {endpoint.request_body.content_type}")
+        if endpoint.request_body.description:
+            lines.append(f"Description: {endpoint.request_body.description}")
+
+    if endpoint.responses:
+        lines.append("\nResponses:")
+        for status, response in endpoint.responses.items():
+            lines.append(f"- {status}: {response.description or 'No description'}")
+            if response.content_type:
+                lines.append(f"  Content Type: {response.content_type}")
+
+    return "\n".join(lines)

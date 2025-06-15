@@ -1,310 +1,191 @@
 """OpenAPI specification parser and validator."""
 
+import json
+from collections.abc import Hashable, Mapping
+from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import HTTPException, status
 from loguru import logger
-from openapi_spec_validator import validate
-from prance import ResolvingParser  # type: ignore[import-untyped]
-from pydantic import ConfigDict, Field
+from openapi_spec_validator import validate_spec
 
-from src.core.models import BaseModel
+from src.services.models import OpenAPISchema, ParsedEndpoint, ParsedSpec
 
 
-class OpenAPISchema(BaseModel):
-    """OpenAPI schema object model."""
+class SpecValidationError(Exception):
+    """Base class for OpenAPI specification validation errors."""
 
-    type: str | None = None
-    format: str | None = None
-    description: str | None = None
-    items: dict[str, Any] | None = None
-    properties: dict[str, Any] | None = None
-    required: list[str] | None = None
-    enum: list[Any] | None = None
-    default: Any | None = None
+    MISSING_VERSION = "Missing 'openapi' or 'swagger' version field"
+    UNSUPPORTED_VERSION = "Unsupported specification version: {version}"
+    INVALID_PATH_ITEM = "Invalid path item at {path}: not a dict"
+    INVALID_OPERATION = "Invalid operation at {path} {method}: not a dict"
+    PARSE_SCHEMA_ERROR = "Failed to parse schema from content: {content}"
+    PARSE_SPEC_ERROR = "Failed to parse specification: {error}"
 
-
-class ParsedParameter(BaseModel):
-    """Parsed parameter information."""
-
-    name: str
-    location: str
-    required: bool = False
-    api_schema: OpenAPISchema | None = None
-    description: str | None = None
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-
-class ParsedRequestBody(BaseModel):
-    """Parsed request body information."""
-
-    required: bool = False
-    content_type: str
-    api_schema: OpenAPISchema | None = None
-    description: str | None = None
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-
-class ParsedResponse(BaseModel):
-    """Parsed response information."""
-
-    status_code: str
-    description: str | None = None
-    content_type: str | None = None
-    api_schema: OpenAPISchema | None = None
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-
-class ParsedEndpoint(BaseModel):
-    """Parsed endpoint information."""
-
-    method: str
-    path: str
-    summary: str | None = None
-    description: str | None = None
-    parameters: list[ParsedParameter] = Field(default_factory=list)
-    request_body: ParsedRequestBody | None = None
-    responses: dict[str, ParsedResponse] = Field(default_factory=dict)
-
-    @classmethod
-    def from_operation(
-        cls: type["ParsedEndpoint"], method: str, path: str, operation: dict
-    ) -> "ParsedEndpoint":
-        """Create an endpoint from an OpenAPI operation object."""
-        return cls(
-            method=method.upper(),
-            path=path,
-            summary=operation.get("summary"),
-            description=operation.get("description"),
-            parameters=cls._parse_parameters(operation.get("parameters", [])),
-            request_body=cls._parse_request_body(
-                operation.get("requestBody"), method, path
-            ),
-            responses=cls._parse_responses(
-                operation.get("responses", {}), method, path
-            ),
-        )
-
-    @staticmethod
-    def _parse_parameters(params: list[Any]) -> list[ParsedParameter]:
-        """Parse operation parameters."""
-        parameters = []
-        for param in params:
-            if not isinstance(param, dict):
-                continue
-            parameters.append(
-                ParsedParameter(
-                    name=param.get("name", ""),
-                    location=param.get("in", "query"),
-                    required=param.get("required", False),
-                    api_schema=OpenAPISchema(**param.get("schema", {})),
-                    description=param.get("description"),
-                )
-            )
-        return parameters
-
-    @staticmethod
-    def _parse_request_body(
-        body: dict | None, method: str, path: str
-    ) -> ParsedRequestBody | None:
-        """Parse operation request body."""
-        if not body:
-            return None
-
-        if not isinstance(body, dict):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid request body at {path} {method}: {body}",
-            )
-
-        content_type, api_schema = parse_schema(body["content"])
-        return ParsedRequestBody(
-            required=body.get("required", False),
-            content_type=content_type,
-            api_schema=api_schema,
-            description=body.get("description"),
-        )
-
-    @staticmethod
-    def _parse_responses(
-        responses: dict[str, Any], method: str, path: str
-    ) -> dict[str, ParsedResponse]:
-        """Parse operation responses."""
-        parsed_responses = {}
-        for status_code, response_info in responses.items():
-            if not isinstance(response_info, dict):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid response at {path} {method}: {response_info}",
-                )
-
-            content_type, api_schema = parse_schema(response_info.get("content", {}))
-            parsed_responses[str(status_code)] = ParsedResponse(
-                status_code=str(status_code),
-                description=response_info.get("description"),
-                content_type=content_type if content_type else None,
-                api_schema=api_schema,
-            )
-        return parsed_responses
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
 
 
 def parse_schema(content: dict[str, Any]) -> tuple[str, OpenAPISchema | None]:
-    """Parse a schema from a content dictionary."""
+    """Parse schema from content dictionary.
+
+    Args:
+        content: Content dictionary containing schema information
+
+    Returns:
+        Tuple of content type and parsed schema
+    """
+
+    def _raise_parse_schema_error(content: dict) -> tuple[str, OpenAPISchema | None]:
+        raise SpecValidationError(
+            SpecValidationError.PARSE_SCHEMA_ERROR.format(content=content)
+        )
+
     if not content:
         return "", None
 
-    content_type, schema_info = next(iter(content.items()), ("", {}))
-    if not isinstance(schema_info, dict) or "schema" not in schema_info:
+    content_type = next(iter(content.keys()))
+    schema_info = content[content_type]
+    if not schema_info or "schema" not in schema_info:
         return content_type, None
 
     schema_data = schema_info["schema"]
-    return content_type, OpenAPISchema(**schema_data) if isinstance(
-        schema_data, dict
-    ) else None
+    if isinstance(schema_data, dict):
+        return content_type, OpenAPISchema(**schema_data)
+    if schema_data is None:
+        return content_type, None
+    return _raise_parse_schema_error(content)
 
 
-class ParsedSpec(BaseModel):
-    """Structured representation of an OpenAPI spec."""
-
-    title: str
-    version: str
-    description: str | None
-    endpoints: list[ParsedEndpoint]
-    components: dict[str, Any]
-
-
-def parse_openapi_spec(content: str) -> ParsedSpec:
-    """
-    Parse and validate an OpenAPI specification.
+def _validate_spec(spec: Mapping[Hashable, Any], spec_type: str) -> None:
+    """Validate an OpenAPI specification.
 
     Args:
-        content: The raw OpenAPI spec content (JSON or YAML)
-
-    Returns:
-        ParsedSpec: A structured representation of the spec
+        spec: The specification to validate
+        spec_type: The type of specification (openapi or swagger)
 
     Raises:
-        HTTPException: If the spec is invalid or missing required fields
+        SpecValidationError: If the specification is invalid
+    """
+    if spec_type.startswith("3."):
+        validate_spec(spec)
+        logger.info("Validated OpenAPI 3.0 specification")
+    elif spec_type.startswith("2."):
+        validate_spec(spec)
+        logger.info("Validated Swagger 2.0 specification")
+    else:
+        raise SpecValidationError(
+            SpecValidationError.UNSUPPORTED_VERSION.format(version=spec_type)
+        )
+
+
+def _raise_validation_error(error: Exception) -> None:
+    """Raise a validation error with the given error message.
+
+    Args:
+        error: The error to wrap
+
+    Raises:
+        SpecValidationError: The wrapped error
+    """
+    raise SpecValidationError(
+        SpecValidationError.PARSE_SPEC_ERROR.format(error=error)
+    ) from error
+
+
+def _raise_missing_version() -> None:
+    """Raise a missing version error."""
+    raise SpecValidationError(SpecValidationError.MISSING_VERSION)
+
+
+def parse_spec(spec_path: Path) -> ParsedSpec:
+    """Parse an OpenAPI specification from a file.
+
+    Args:
+        spec_path: Path to the specification file
+
+    Returns:
+        ParsedSpec: The parsed specification
+
+    Raises:
+        SpecValidationError: If the specification is invalid
     """
     try:
-        # Convert dict/list to YAML string if needed
-        if isinstance(content, dict | list):
-            content = yaml.dump(content)
+        # Read the file
+        with spec_path.open() as f:
+            if spec_path.suffix.lower() in [".yaml", ".yml"]:
+                spec = yaml.safe_load(f)
+            else:
+                spec = json.load(f)
 
-        # Parse and validate basic structure
-        spec = _parse_yaml(content)
+        # Determine spec type and validate
+        spec_type = spec.get("openapi") or spec.get("swagger")
 
-        # Attempt to resolve references
-        validated_spec = _resolve_references(content, spec)
+        if not spec_type:
+            _raise_missing_version()
 
-        # Validate the resolved spec
-        _validate_spec(validated_spec)
+        try:
+            _validate_spec(spec, spec_type)
+        except Exception as e:
+            logger.warning(f"Specification validation warning: {e}")
+            # Continue processing even with validation warnings
 
-        return _parse_endpoints(validated_spec)
+    except Exception as e:
+        logger.error(f"Error parsing specification: {e}")
+        _raise_validation_error(e)
 
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to parse OpenAPI spec")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse OpenAPI spec: {exc}",
-        ) from exc
-
-
-def _parse_yaml(content: str) -> dict[str, Any]:
-    try:
-        spec = yaml.safe_load(content)
-    except yaml.YAMLError as exc:
-        logger.error(f"Failed to parse YAML: {exc}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid YAML/JSON format: {exc}",
-        ) from exc
-
-    # Validate basic structure
-    if not isinstance(spec, dict):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Spec must be a YAML/JSON object",
-        )
-
-    # Validate required OpenAPI fields
-    if "openapi" not in spec:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing 'openapi' version field",
-        )
-
-    if "info" not in spec:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing 'info' section",
-        )
-
-    if "paths" not in spec:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing 'paths' section",
-        )
-
-    return spec
-
-
-def _resolve_references(content: str, fallback_spec: dict) -> dict[str, Any]:
-    """Resolve OpenAPI spec references with fallback to basic spec."""
-    try:
-        parser = ResolvingParser(
-            spec_string=content,
-            backend="openapi-spec-validator",
-            strict=False,
-        )
-    except Exception as resolve_error:
-        logger.warning(
-            f"Reference resolution failed, using basic spec: {resolve_error}"
-        )
-        return fallback_spec
-    else:
-        return parser.specification
-
-
-def _validate_spec(spec: dict[str, Any]) -> None:
-    """Validate OpenAPI spec structure."""
-    try:
-        spec_str = yaml.dump(spec) if isinstance(spec, dict) else spec
-        validate(yaml.safe_load(spec_str))
-    except Exception as validation_error:
-        logger.warning(f"OpenAPI validation failed: {validation_error}")
+    return _parse_endpoints(spec)
 
 
 def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
-    """Parse endpoints from an OpenAPI specification."""
+    """Parse endpoints from validated specification.
+
+    Args:
+        validated_spec: The validated specification
+
+    Returns:
+        ParsedSpec: The parsed specification with endpoints
+    """
     endpoints: list[ParsedEndpoint] = []
     for path, path_item in validated_spec.get("paths", {}).items():
         if not isinstance(path_item, dict):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid path item at {path}: not a dict",
-            )
+            logger.warning(f"Invalid path item at {path}: not a dict")
+            continue
 
         for method, operation in path_item.items():
             if not isinstance(operation, dict):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid operation at {path} {method}: not a dict",
-                )
+                logger.warning(f"Invalid operation at {path} {method}: not a dict")
+                continue
+
             if not _is_valid_method(method):
                 continue
 
-            endpoints.append(ParsedEndpoint.from_operation(method, path, operation))
+            try:
+                # Fix invalid parameters format if needed
+                if "parameters" in operation and not isinstance(
+                    operation["parameters"], list
+                ):
+                    logger.warning(
+                        f"Invalid parameters format at {path} {method}, "
+                        "converting to list"
+                    )
+                    if isinstance(operation["parameters"], dict):
+                        operation["parameters"] = list(operation["parameters"].values())
+                    else:
+                        operation["parameters"] = []
+
+                endpoints.append(ParsedEndpoint.from_operation(method, path, operation))
+            except Exception as e:
+                logger.warning(f"Failed to parse endpoint {path} {method}: {e}")
+                continue
+
+    if not endpoints:
+        logger.warning("No valid endpoints found in specification")
 
     return ParsedSpec(
         title=validated_spec["info"].get("title", "Untitled API"),
-        version=validated_spec["info"].get("version", "0.0.0"),
+        version=validated_spec["info"].get("version", "1.0.0"),
         description=validated_spec["info"].get("description"),
         endpoints=endpoints,
         components=validated_spec.get("components", {}),
@@ -312,7 +193,14 @@ def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
 
 
 def _is_valid_method(method: str) -> bool:
-    """Check if a method is a valid HTTP method."""
+    """Check if a method is valid.
+
+    Args:
+        method: The HTTP method to check
+
+    Returns:
+        True if the method is valid
+    """
     return method.upper() in {
         "GET",
         "POST",

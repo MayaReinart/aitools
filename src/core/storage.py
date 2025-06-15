@@ -193,3 +193,19 @@ class JobStorage:
             )
         # MARKDOWN
         return path.read_text(), "text/markdown"
+
+    def save_output(self, filename: str, content: str) -> Path:
+        """Save an output file.
+
+        Args:
+            filename: Name of the output file
+            content: Content to save
+
+        Returns:
+            Path to the saved file
+        """
+        output_path = self.job_dir / filename
+        output_path.write_text(content)
+        self.log_event(f"Saved output file: {filename}")
+        logger.info(f"Saved {self.job_id} output to {output_path}")
+        return output_path
