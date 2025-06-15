@@ -1,4 +1,6 @@
 .env
 **/__pycache__/
 .cursor/
-/node_modules/
+node_modules/
+logs/
+results/
