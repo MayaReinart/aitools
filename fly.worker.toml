@@ -16,31 +16,9 @@ primary_region = "lax"
   cpu_shares = 1
   memory_mb = 256
 
-# Ensure the worker keeps running
 [processes]
-  worker = "poetry run celery -A src.tasks.celery_worker worker --loglevel=info --concurrency=2"
+  app = "poetry run celery -A src.tasks.celery_worker worker --loglevel=info --concurrency=2"
 
-[[services]]
-  protocol = "tcp"
-  internal_port = 8080
-  processes = ["worker"]
-  min_machines_running = 1
-  auto_stop_machines = false
-  auto_start_machines = true
-  min_machines_running = 1
-  restart_limit = 0
-
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 5
-    soft_limit = 3
-
-  [[services.tcp_checks]]
-    interval = "30s"
-    timeout = "10s"
-    grace_period = "120s"
-    restart_limit = 3
-
+# Simple process-based deployment
 [deploy]
   strategy = "immediate"
-  release_command = "echo 'Worker starting...'"
