@@ -1,11 +1,13 @@
 """API routes for the application."""
 
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
+from pydantic import BaseModel
 
 from src.api.exceptions import (
     InvalidFormatError,
@@ -17,6 +19,7 @@ from src.core.health import check_celery_worker, check_redis_connection
 from src.core.models import TaskState
 from src.core.state import state_store
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
+from src.services.llm import get_llm_spec_analysis_with_vector_store
 from src.tasks.pipeline import create_processing_chain
 from src.tasks.standalone import verify_broker_connection
 
@@ -230,3 +233,39 @@ async def export_summary(
         )
     # MARKDOWN
     return Response(content=content, media_type=media_type)
+
+
+class SpecQuery(BaseModel):
+    """Query model for spec analysis."""
+
+    query: str
+
+
+@router.post("/spec/{job_id}/query")
+async def query_spec(job_id: str, query: SpecQuery) -> JSONResponse:
+    """Query the uploaded spec with a natural language question."""
+    storage = JobStorage(job_id)
+
+    # Check if the spec exists
+    spec_path = storage.get_spec_path()
+    if not spec_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Spec not found",
+        )
+
+    try:
+        # Read the spec content
+        with Path(spec_path).open() as f:
+            spec_content = f.read()
+
+        # Get response from LLM
+        response = get_llm_spec_analysis_with_vector_store(spec_content, query.query)
+
+        return JSONResponse(content={"answer": str(response)})
+    except Exception as e:
+        logger.error(f"Error querying spec: {e!s}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process query",
+        ) from e
