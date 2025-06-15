@@ -6,10 +6,15 @@ A service that analyzes OpenAPI specifications and generates natural language su
 
 - Upload and parse OpenAPI specifications (JSON/YAML)
 - Generate natural language summaries of API endpoints
-- Export summaries in multiple formats (Markdown, HTML, DOCX)
 - Asynchronous processing with job status tracking
 - Structured logging and error handling
 - Simple web interface for file uploads and results access
+
+## Planned Features
+
+- Export summaries in multiple formats (Markdown, HTML, DOCX)
+- Ad-hoc user queries
+- Ask the tool to test endpoints for you
 
 ## Tech Stack
 
@@ -262,3 +267,11 @@ With coverage:
 ```bash
 poetry run pytest --cov=src
 ```
+
+## Developer's note
+
+I created this repo for the following purposes:
+
+- Get familiar with LLM tools I haven't used at all or only used to a limited extent.
+
+- Create a production-grade mini project with robust infrastructure: CI/CD, lint, tests, documentation. I might later turn it into a template for future projects, extend the functionality, etc.
