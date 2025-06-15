@@ -8,7 +8,8 @@ from typing import Any
 from loguru import logger  # type: ignore
 
 from .config import LogConfig
-from .handlers import InterceptHandler, get_caller_info
+from .formatters import setup_trimmed_logging
+from .handlers import InterceptHandler, get_caller_info, trim_message
 
 
 def get_logger(name: str | None = None) -> Any:  # noqa: ANN401
@@ -39,7 +40,7 @@ def setup_logging(config: LogConfig | None = None) -> None:
     # Remove default handler
     logger.remove()
 
-    # Add console handler
+    # Add console handler with message trimming
     logger.add(
         sys.stderr,
         format=config.console_format,
@@ -47,9 +48,11 @@ def setup_logging(config: LogConfig | None = None) -> None:
         enqueue=True,
         diagnose=True,
         backtrace=True,
+        filter=lambda record: record["extra"].get("message", "")
+        == trim_message(record["extra"].get("message", "")),
     )
 
-    # Add file handler
+    # Add file handler with message trimming
     now = datetime.now(timezone.utc)
     log_file = config.log_dir / f"api_{now.strftime('%Y%m%d_%H%M%S')}.log"
 
@@ -68,7 +71,12 @@ def setup_logging(config: LogConfig | None = None) -> None:
         enqueue=True,
         diagnose=True,
         backtrace=True,
+        filter=lambda record: record["extra"].get("message", "")
+        == trim_message(record["extra"].get("message", "")),
     )
 
-    # Configure standard library logging to use loguru
+    # Configure standard library logging to use loguru with message trimming
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+
+    # Set up global message trimming
+    setup_trimmed_logging()

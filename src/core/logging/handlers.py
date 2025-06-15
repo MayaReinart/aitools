@@ -31,6 +31,21 @@ def get_caller_info() -> tuple[str, str, int]:
     )
 
 
+def trim_message(message: str, max_length: int = 1000) -> str:
+    """Trim a message if it exceeds the maximum length.
+
+    Args:
+        message: The message to trim
+        max_length: Maximum length before trimming
+
+    Returns:
+        Trimmed message
+    """
+    if len(message) > max_length:
+        return message[:max_length] + "... (truncated)"
+    return message
+
+
 class InterceptHandler(logging.Handler):
     """Intercepts standard library logging and redirects to loguru."""
 
@@ -47,12 +62,16 @@ class InterceptHandler(logging.Handler):
             level = str(record.levelno)
 
         # Find caller from where originated the logged message
-        frame, depth = inspect.currentframe(), 0
+        frame: FrameType | None = inspect.currentframe()
+        depth = 0
         while frame and (depth == 0 or frame.f_code.co_filename == logging.__file__):
             frame = frame.f_back
             depth += 1
 
+        # Trim the message if it's too long
+        message = trim_message(record.getMessage())
+
         logger.opt(depth=depth, exception=record.exc_info).log(
             level,
-            record.getMessage(),
+            message,
         )
