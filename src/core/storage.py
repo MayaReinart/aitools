@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from docx import Document
 from loguru import logger
@@ -52,6 +53,12 @@ class JobStorage:
     """Handles storage and retrieval of job-related data."""
 
     def __init__(self, job_id: str) -> None:
+        """Initialize storage for a job.
+
+        Args:
+            job_id: Unique identifier for the job
+        """
+
         self.job_id = job_id
         self.job_dir = JOB_DATA_ROOT / job_id
 
@@ -66,14 +73,22 @@ class JobStorage:
             self.log_file.touch(mode=0o644)
 
     def save_spec(self, content: str, format_: SpecFormat) -> Path:
-        """Save the uploaded spec file."""
+        """Save the uploaded spec file.
+
+        Args:
+            content: The spec content to save
+            format_: The format of the spec (YAML or JSON)
+
+        Returns:
+            Path to the saved spec file
+        """
         spec_path = self.job_dir / f"spec.{format_.value}"
         spec_path.write_text(content)
         self.log_event("Saved spec file")
         logger.info(f"Saved {self.job_id} spec to {spec_path}")
         return spec_path
 
-    def save_summary(self, summary: dict) -> Path:
+    def save_summary(self, summary: dict[str, Any]) -> Path:
         """Save the generated summary."""
         summary_path = self.job_dir / "summary.json"
         summary_path.write_text(json.dumps(summary, indent=2))
@@ -92,7 +107,7 @@ class JobStorage:
         logger.info(f"Saved {self.job_id} export to {export_path}")
         return export_path
 
-    def save_parsed_spec(self, parsed_spec: dict) -> Path:
+    def save_parsed_spec(self, parsed_spec: dict[str, Any]) -> Path:
         """Save the parsed OpenAPI spec."""
         parsed_spec_path = self.job_dir / "parsed_spec.json"
         parsed_spec_path.write_text(json.dumps(parsed_spec, indent=2))
