@@ -1,0 +1,17 @@
+openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+  description: A test API
+paths:
+  /test:
+    get:
+      summary: Test endpoint
+      parameters:
+        - name: test_param
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK

@@ -1,0 +1,9 @@
+openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      responses:
+        "200": not_an_object
