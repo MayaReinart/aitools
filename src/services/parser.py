@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 from loguru import logger
-from openapi_spec_validator import validate_spec
+from openapi_spec_validator import validate
 
 from src.services.models import OpenAPISchema, ParsedEndpoint, ParsedSpec
 
@@ -19,6 +19,7 @@ class SpecValidationError(Exception):
     UNSUPPORTED_VERSION = "Unsupported specification version: {version}"
     INVALID_PATH_ITEM = "Invalid path item at {path}: not a dict"
     INVALID_OPERATION = "Invalid operation at {path} {method}: not a dict"
+    INVALID_RESPONSE = "Invalid response at {path} {method}: not a dict"
     PARSE_SCHEMA_ERROR = "Failed to parse schema from content: {content}"
     PARSE_SPEC_ERROR = "Failed to parse specification: {error}"
 
@@ -69,10 +70,10 @@ def _validate_spec(spec: Mapping[Hashable, Any], spec_type: str) -> None:
         SpecValidationError: If the specification is invalid
     """
     if spec_type.startswith("3."):
-        validate_spec(spec)
+        validate(spec)
         logger.info("Validated OpenAPI 3.0 specification")
     elif spec_type.startswith("2."):
-        validate_spec(spec)
+        validate(spec)
         logger.info("Validated Swagger 2.0 specification")
     else:
         raise SpecValidationError(
@@ -99,11 +100,11 @@ def _raise_missing_version() -> None:
     raise SpecValidationError(SpecValidationError.MISSING_VERSION)
 
 
-def parse_spec(spec_path: Path) -> ParsedSpec:
-    """Parse an OpenAPI specification from a file.
+def _parse_spec_from_text(content: str | dict[str, Any]) -> ParsedSpec:
+    """Parse an OpenAPI specification from text content.
 
     Args:
-        spec_path: Path to the specification file
+        content: The specification content as string or dict
 
     Returns:
         ParsedSpec: The parsed specification
@@ -112,16 +113,22 @@ def parse_spec(spec_path: Path) -> ParsedSpec:
         SpecValidationError: If the specification is invalid
     """
     try:
-        # Read the file
-        with spec_path.open() as f:
-            if spec_path.suffix.lower() in [".yaml", ".yml"]:
-                spec = yaml.safe_load(f)
-            else:
-                spec = json.load(f)
+        # Convert string to dict if needed
+        if isinstance(content, str):
+            try:
+                spec = yaml.safe_load(content)
+            except yaml.YAMLError:
+                try:
+                    spec = json.loads(content)
+                except json.JSONDecodeError as e:
+                    raise SpecValidationError(
+                        SpecValidationError.PARSE_SPEC_ERROR.format(error=e)
+                    ) from e
+        else:
+            spec = content
 
         # Determine spec type and validate
         spec_type = spec.get("openapi") or spec.get("swagger")
-
         if not spec_type:
             _raise_missing_version()
 
@@ -131,11 +138,84 @@ def parse_spec(spec_path: Path) -> ParsedSpec:
             logger.warning(f"Specification validation warning: {e}")
             # Continue processing even with validation warnings
 
+        return _parse_endpoints(spec)
+
     except Exception as e:
         logger.error(f"Error parsing specification: {e}")
         _raise_validation_error(e)
+    return ParsedSpec(
+        title="", version="", description=None, endpoints=[], components={}
+    )
 
-    return _parse_endpoints(spec)
+
+def parse_spec(spec_path: Path | str | dict[str, Any]) -> ParsedSpec:
+    """Parse an OpenAPI specification from a file or content.
+
+    Args:
+        spec_path: Path to the specification file, or the spec content itself
+
+    Returns:
+        ParsedSpec: The parsed specification
+
+    Raises:
+        SpecValidationError: If the specification is invalid
+    """
+    if isinstance(spec_path, str | dict):
+        return _parse_spec_from_text(spec_path)
+
+    try:
+        # Read the file
+        with spec_path.open() as f:
+            if spec_path.suffix.lower() in [".yaml", ".yml"]:
+                spec = yaml.safe_load(f)
+            else:
+                spec = json.load(f)
+
+        return _parse_spec_from_text(spec)
+
+    except Exception as e:
+        logger.error(f"Error reading specification file: {e}")
+        _raise_validation_error(e)
+    return ParsedSpec(
+        title="", version="", description=None, endpoints=[], components={}
+    )
+
+
+def _validate_responses(operation: dict[str, Any], path: str, method: str) -> None:
+    """Validate operation responses.
+
+    Args:
+        operation: The operation to validate
+        path: The path of the operation
+        method: The HTTP method of the operation
+    """
+    if "responses" in operation:
+        for response in operation["responses"].values():
+            if not isinstance(response, dict):
+                logger.warning(
+                    SpecValidationError.INVALID_RESPONSE.format(
+                        path=path, method=method
+                    )
+                )
+                break
+
+
+def _fix_parameters(operation: dict[str, Any], path: str, method: str) -> None:
+    """Fix invalid parameters format if needed.
+
+    Args:
+        operation: The operation to fix
+        path: The path of the operation
+        method: The HTTP method of the operation
+    """
+    if "parameters" in operation and not isinstance(operation["parameters"], list):
+        logger.warning(
+            f"Invalid parameters format at {path} {method}, converting to list"
+        )
+        if isinstance(operation["parameters"], dict):
+            operation["parameters"] = list(operation["parameters"].values())
+        else:
+            operation["parameters"] = []
 
 
 def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
@@ -146,35 +226,35 @@ def _parse_endpoints(validated_spec: dict[str, Any]) -> ParsedSpec:
 
     Returns:
         ParsedSpec: The parsed specification with endpoints
+
+    Raises:
+        SpecValidationError: If the specification is invalid
     """
+    if "info" not in validated_spec:
+        raise SpecValidationError("'info'")
+
     endpoints: list[ParsedEndpoint] = []
     for path, path_item in validated_spec.get("paths", {}).items():
         if not isinstance(path_item, dict):
-            logger.warning(f"Invalid path item at {path}: not a dict")
+            logger.warning(SpecValidationError.INVALID_PATH_ITEM.format(path=path))
             continue
 
         for method, operation in path_item.items():
             if not isinstance(operation, dict):
-                logger.warning(f"Invalid operation at {path} {method}: not a dict")
+                logger.warning(
+                    SpecValidationError.INVALID_OPERATION.format(
+                        path=path, method=method
+                    )
+                )
                 continue
 
             if not _is_valid_method(method):
                 continue
 
-            try:
-                # Fix invalid parameters format if needed
-                if "parameters" in operation and not isinstance(
-                    operation["parameters"], list
-                ):
-                    logger.warning(
-                        f"Invalid parameters format at {path} {method}, "
-                        "converting to list"
-                    )
-                    if isinstance(operation["parameters"], dict):
-                        operation["parameters"] = list(operation["parameters"].values())
-                    else:
-                        operation["parameters"] = []
+            _validate_responses(operation, path, method)
+            _fix_parameters(operation, path, method)
 
+            try:
                 endpoints.append(ParsedEndpoint.from_operation(method, path, operation))
             except Exception as e:
                 logger.warning(f"Failed to parse endpoint {path} {method}: {e}")

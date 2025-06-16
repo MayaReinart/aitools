@@ -1,7 +1,7 @@
 """Data models for API specification parsing and analysis."""
 
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,8 +59,8 @@ class ParsedEndpoint(BaseModel):
     """Parsed endpoint information."""
 
     # Error messages
-    INVALID_BODY = "Invalid request body at {path} {method}: {body}"
-    INVALID_RESPONSE = "Invalid response at {path} {method}: {response}"
+    INVALID_BODY: ClassVar[str] = "Invalid request body at {path} {method}: {body}"
+    INVALID_RESPONSE: ClassVar[str] = "Invalid response at {path} {method}: {response}"
 
     method: str
     path: str

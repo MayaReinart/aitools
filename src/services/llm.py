@@ -1,6 +1,7 @@
 """OpenAI integration for API analysis."""
 
 from llama_index.core import Document, VectorStoreIndex  # type: ignore
+from llama_index.core.base.response.schema import Response  # type: ignore
 from loguru import logger
 from openai import OpenAI
 from openai.types.chat import (
@@ -114,13 +115,23 @@ def _get_completion(prompt: str, config: LLMConfig | None = None) -> str:
         raise
 
 
-def get_llm_spec_analysis_with_vector_store(spec: str, query: str) -> str:
+def get_llm_spec_analysis_with_vector_store(spec: str, query: str) -> Response:
     """
     Analyze an OpenAPI specification using LLM and vector store.
+
+    Args:
+        spec: The OpenAPI specification text
+        query: The query to analyze
+
+    Returns:
+        Response: The LLM response
     """
     docs = [Document(text=spec)]
 
     index = VectorStoreIndex.from_documents(docs)
     engine = index.as_query_engine()
 
-    return engine.query(query)
+    result = engine.query(query)
+    if not isinstance(result, Response):
+        raise TypeError(type(result).__name__)
+    return result

@@ -10,7 +10,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.completion_usage import CompletionUsage
 
 from src.services.llm import LLMConfig, SpecAnalysis, get_llm_spec_analysis
-from src.services.parser import parse_openapi_spec
+from src.services.parser import parse_spec
 
 SAMPLES_PATH = Path(__file__).parent / "samples"
 
@@ -47,7 +47,7 @@ def create_mock_chat_completion(content: str) -> ChatCompletion:
 def test_analyze_petstore_spec() -> None:
     """Test analyzing the Petstore OpenAPI spec."""
     # Parse the sample spec
-    spec = parse_openapi_spec((SAMPLES_PATH / "petstore.yaml").read_text())
+    spec = parse_spec(SAMPLES_PATH / "petstore.yaml")
 
     # Analyze the spec using LLM
     analysis = get_llm_spec_analysis(spec)
@@ -73,7 +73,7 @@ def test_analyze_petstore_spec() -> None:
 
 def test_rate_limit_handling() -> None:
     """Test handling of rate limit errors."""
-    spec = parse_openapi_spec((SAMPLES_PATH / "sample.yaml").read_text())
+    spec = parse_spec(SAMPLES_PATH / "sample.yaml")
 
     with patch("src.services.llm.client") as mock_client:
         mock_client.chat.completions.create.side_effect = APIError(
@@ -90,7 +90,7 @@ def test_rate_limit_handling() -> None:
 
 def test_custom_model_config() -> None:
     """Test using custom model configuration."""
-    spec = parse_openapi_spec((SAMPLES_PATH / "sample.yaml").read_text())
+    spec = parse_spec(SAMPLES_PATH / "sample.yaml")
     config = LLMConfig(model="gpt-4", temperature=0.7, max_tokens=2000)
 
     mock_response = create_mock_chat_completion("Test analysis content")
@@ -138,7 +138,7 @@ def test_token_limit_handling() -> None:
                                                 type: string
         """
 
-    spec = parse_openapi_spec(large_spec)
+    spec = parse_spec(large_spec)
 
     responses_count = 100
 
@@ -173,7 +173,7 @@ def test_token_limit_handling() -> None:
 )
 def test_error_handling(error_type: type[Exception], error_msg: str) -> None:
     """Test handling of various error conditions."""
-    spec = parse_openapi_spec((SAMPLES_PATH / "sample.yaml").read_text())
+    spec = parse_spec(SAMPLES_PATH / "sample.yaml")
 
     with patch("src.services.llm.client") as mock_client:
         mock_client.chat.completions.create.side_effect = error_type(error_msg)

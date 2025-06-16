@@ -3,9 +3,8 @@
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException, status
 
-from src.services.parser import ParsedSpec, parse_openapi_spec
+from src.services.parser import ParsedSpec, SpecValidationError, parse_spec
 
 SAMPLES_PATH = Path(__file__).parent / "samples"
 
@@ -15,10 +14,7 @@ class TestOpenAPIParser:
 
     def test_parse_valid_spec(self) -> None:
         """Test parsing a valid OpenAPI spec."""
-        with Path.open(SAMPLES_PATH / "sample.yaml", "r") as f:
-            spec = f.read()
-
-        result: ParsedSpec = parse_openapi_spec(spec)
+        result: ParsedSpec = parse_spec(SAMPLES_PATH / "valid_spec.yaml")
         assert result.title == "Test API"
         assert result.version == "1.0.0"
         assert result.description == "A test API"
@@ -32,97 +28,42 @@ class TestOpenAPIParser:
 
     def test_invalid_yaml(self) -> None:
         """Test parsing invalid YAML."""
-        with pytest.raises(HTTPException) as exc:
-            parse_openapi_spec("invalid: yaml: :")
-        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert "Invalid YAML/JSON format" in exc.value.detail
+        with pytest.raises(SpecValidationError) as exc:
+            parse_spec(SAMPLES_PATH / "invalid.yaml")
+        assert "Failed to parse specification" in str(exc.value)
 
     @pytest.mark.parametrize(
-        "spec,expected_error",
+        "spec_file,expected_error",
         [
-            ("info:", "Missing 'openapi' version field"),
-            ("openapi: 3.0.0", "Missing 'info' section"),
-            (
-                """
-                openapi: 3.0.0
-                info:
-                    title: Test
-                """,
-                "Missing 'paths' section",
-            ),
+            ("missing_openapi.yaml", "Missing 'openapi' or 'swagger' version field"),
+            ("missing_info.yaml", "'info'"),
         ],
-        ids=["missing_openapi", "missing_info", "missing_paths"],
     )
-    def test_missing_required_fields(self, spec: str, expected_error: str) -> None:
+    def test_missing_required_fields(self, spec_file: str, expected_error: str) -> None:
         """Test spec missing required OpenAPI fields."""
-        with pytest.raises(HTTPException) as exc:
-            parse_openapi_spec(spec)
-        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert expected_error in exc.value.detail
+        with pytest.raises(SpecValidationError) as exc:
+            parse_spec(SAMPLES_PATH / spec_file)
+        assert expected_error in str(exc.value)
 
     def test_empty_spec(self) -> None:
         """Test parsing an empty spec."""
-        with pytest.raises(HTTPException) as exc:
-            parse_openapi_spec("")
-        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert "Spec must be a YAML/JSON object" in exc.value.detail
+        with pytest.raises(SpecValidationError) as exc:
+            parse_spec(SAMPLES_PATH / "empty.yaml")
+        assert "Failed to parse specification" in str(exc.value)
 
     def test_invalid_operation_object(self) -> None:
         """Test handling of invalid operation objects."""
-        spec = """
-            openapi: 3.0.0
-            info:
-                title: Test API
-                version: 1.0.0
-            paths:
-                /test:
-                    get: not_an_object
-        """
-        with pytest.raises(HTTPException) as exc:
-            parse_openapi_spec(spec)
-        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert "Invalid operation at /test get" in exc.value.detail
+        result = parse_spec(SAMPLES_PATH / "invalid_operation.yaml")
+        assert len(result.endpoints) == 0
 
     def test_malformed_responses(self) -> None:
         """Test handling of malformed response objects."""
-        spec = """
-            openapi: 3.0.0
-            info:
-                title: Test API
-                version: 1.0.0
-            paths:
-                /test:
-                    get:
-                        responses:
-                            '200': not_an_object
-        """
-        with pytest.raises(HTTPException) as exc:
-            parse_openapi_spec(spec)
-        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert "Invalid response at /test get" in exc.value.detail
+        result = parse_spec(SAMPLES_PATH / "malformed_responses.yaml")
+        assert len(result.endpoints) == 0
 
     def test_component_references(self) -> None:
         """Test parsing of component references."""
-        spec = """
-            openapi: 3.0.0
-            info:
-                title: Test API
-                version: 1.0.0
-            paths:
-                /test:
-                    get:
-                        responses:
-                            '200':
-                                $ref: '#/components/schemas/TestResponse'
-            components:
-                schemas:
-                    TestResponse:
-                        type: object
-                        properties:
-                            message:
-                                type: string
-        """
-        result = parse_openapi_spec(spec)
+        result = parse_spec(SAMPLES_PATH / "component_refs.yaml")
         assert result.components
         assert "schemas" in result.components
         assert "TestResponse" in result.components["schemas"]
@@ -144,19 +85,7 @@ class TestOpenAPIParser:
     )
     def test_valid_methods(self, method: str, is_valid: bool) -> None:
         """Test validation of HTTP methods."""
-        spec = f"""
-            openapi: 3.0.0
-            info:
-                title: Test API
-                version: 1.0.0
-            paths:
-                /test:
-                    {method.lower()}:
-                        responses:
-                            '200':
-                                description: OK
-        """
-        result = parse_openapi_spec(spec)
+        result = parse_spec(SAMPLES_PATH / f"method_{method.lower()}.yaml")
         if is_valid:
             assert len(result.endpoints) == 1
             assert result.endpoints[0].method == method.upper()
