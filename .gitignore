@@ -1,6 +1,13 @@
 .env
+.env.*.local
 **/__pycache__/
 .cursor/
 node_modules/
 logs/
 results/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.vscode/
+.venv/
+htmlcov/
