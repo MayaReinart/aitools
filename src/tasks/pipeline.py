@@ -1,7 +1,6 @@
 """Chain-based API processing pipeline."""
 
 from pathlib import Path
-from typing import Any
 
 from celery import Task  # type: ignore
 from celery.canvas import chain as celery_chain  # type: ignore
@@ -61,7 +60,7 @@ class ParseSpecResult(BaseModel):
 
     status: str
     job_id: str
-    spec: ParsedSpec  # Change from dict[str, Any] to ParsedSpec
+    spec: ParsedSpec
     task_id: str | None = None
 
 
@@ -69,9 +68,7 @@ class AnalysisResult(BaseModel):
     """Result of analyze_spec_task."""
 
     analysis: SpecAnalysis
-    endpoints: list[
-        ParsedEndpoint
-    ]  # Change from list[dict[str, Any]] to list[ParsedEndpoint]
+    endpoints: list[ParsedEndpoint]
     job_id: str
     task_id: str
     previous_task: str | None = None
@@ -84,7 +81,7 @@ class OutputResult(BaseModel):
     job_id: str
     task_id: str
     previous_task: str | None = None
-    analysis: dict[str, Any] | None = None
+    analysis: SpecAnalysis | None = None
 
 
 @celery_app.task(**setup_task_config())
@@ -270,23 +267,7 @@ def generate_outputs_task(
             job_id=job_id,
             task_id=task_id,
             previous_task=analysis_result.previous_task,
-            analysis={
-                "spec_info": {
-                    "title": spec_analysis.overview.split(" for ")[-1],
-                    "description": spec_analysis.overview,
-                },
-                "summary": {
-                    "overview": spec_analysis.overview,
-                },
-                "endpoints": [
-                    {
-                        "path": endpoint.path,
-                        "method": endpoint.method,
-                        "analysis": endpoint.analysis,
-                    }
-                    for endpoint in spec_analysis.endpoints
-                ],
-            },
+            analysis=spec_analysis,
         )
     except Exception as e:
         logger.error(f"[{job_id}] Error in generate_outputs_task: {e}")

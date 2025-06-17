@@ -25,7 +25,7 @@ class EndpointAnalysis(BaseModel):
 
     path: str
     method: str
-    analysis: str | None = None
+    analysis: str | None = None  # Deprecated
 
 
 class SpecAnalysis(BaseModel):
@@ -66,7 +66,6 @@ def get_llm_spec_analysis(
     logger.info("Analyzing endpoints")
     endpoint_info: list[EndpointAnalysis] = []
     for endpoint in spec.endpoints:
-        logger.info(f"Analyzing endpoint: {endpoint.method} {endpoint.path}")
         endpoint_info.append(
             EndpointAnalysis(
                 path=endpoint.path,

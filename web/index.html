@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API Introspection</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
@@ -129,7 +130,7 @@
                     return; // Exit polling loop
                 } else {
                     // Continue polling for non-terminal states
-                    setTimeout(() => pollStatus(jobId), 10000);
+                    setTimeout(() => pollStatus(jobId), 1000);
                 }
             } catch (error) {
                 showError('Failed to check status. Please try again.');
@@ -144,23 +145,21 @@
             const summaryContent = document.createElement('div');
             summaryContent.className = 'mb-8 p-4 bg-white rounded-lg shadow';
 
-            // Safely access nested properties from result.analysis
-            const analysis = result.analysis || {};
-            const apiInfo = analysis.spec_info || {};
-            const summary = analysis.summary || {};
-            const endpoints = analysis.endpoints || [];
+            const overview = result.analysis.overview || {};
+            const endpoints_analysis = result.analysis.endpoints_analysis || {};
+            const endpoints = result.analysis.endpoints || [];
 
             summaryContent.innerHTML = `
-                <h2 class="text-2xl font-bold mb-4">${apiInfo.title || 'Untitled API'} ${apiInfo.version ? `v${apiInfo.version}` : ''}</h2>
-                <p class="text-gray-600 mb-6">${apiInfo.description || 'No description available'}</p>
+                <h2 class="text-2xl font-bold mb-4">${result.analysis.title || 'Untitled API'} ${result.analysis.version ? `v${result.analysis.version}` : ''}</h2>
 
                 <div class="mb-6">
                     <h3 class="text-xl font-semibold mb-3">Overview</h3>
-                    <p class="text-gray-700">${summary.overview || 'No overview available'}</p>
+                    <div class="text-gray-700 prose prose-sm max-w-none">${marked.parse(overview || 'No overview available')}</div>
                 </div>
 
                 <div class="mb-6">
                     <h3 class="text-xl font-semibold mb-3">Endpoints</h3>
+                    <div class="text-gray-700 prose prose-sm max-w-none">${marked.parse(endpoints_analysis || 'No endpoints available')}</div>
                     <div class="space-y-4">
                         ${endpoints.map(endpoint => `
                             <div class="p-3 bg-gray-50 rounded">
@@ -168,7 +167,6 @@
                                     <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm font-mono">${endpoint.method || 'UNKNOWN'}</span>
                                     <span class="font-mono">${endpoint.path || '/'}</span>
                                 </div>
-                                <p class="text-gray-600">${endpoint.description || endpoint.summary || 'No description available'}</p>
                             </div>
                         `).join('')}
                     </div>

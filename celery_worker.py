@@ -22,6 +22,7 @@ import src.tasks.pipeline  # noqa
 from src.core.celery_app import celery_app
 from src.core.logging import setup_logging
 from src.core.state import state_store
+from src.tasks.pipeline import OutputResult
 
 # Export the Celery app instance
 celery = celery_app
@@ -63,7 +64,7 @@ def task_prerun_handler(
 @task_success.connect
 def task_success_handler(
     sender: Task | None = None,
-    result: dict[str, Any] | None = None,
+    result: dict[str, Any] | OutputResult | None = None,
     **_kwargs: dict[str, Any],
 ) -> None:
     """Log successful task completion and update state."""
@@ -72,15 +73,13 @@ def task_success_handler(
 
     # Handle state updates
     logger.debug(f"Task success handler called with result: {result}")
-    if isinstance(result, dict) and "job_id" in result:
-        job_id = result.pop("job_id")
-        # Only store state if this is the final task (has analysis data)
-        if "analysis" in result:
-            logger.info(f"Storing final result for job {job_id}")
-            logger.debug(f"Setting success state with result: {result}")
-            state_store.set_success(job_id, result)
-        else:
-            logger.debug(f"Skipping state update for job {job_id} - no analysis data")
+    if not result or not result.get("analysis"):
+        logger.debug("Skipping state update - no analysis data in result")
+        return
+
+    logger.info(f"Storing final result for job {result['job_id']}")
+    logger.debug(f"Setting success state with result: {result}")
+    state_store.set_success(result["job_id"], result)
 
 
 @task_failure.connect
