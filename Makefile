@@ -16,6 +16,8 @@ clean:
 	-pkill -f "celery" || true
 	-redis-cli shutdown || true
 	sleep 2
+	rm -rf logs/*
+	rm -rf results/*
 
 redis:
 	redis-server --daemonize yes
