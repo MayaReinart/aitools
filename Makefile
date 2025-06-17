@@ -15,15 +15,17 @@ clean:
 	-pkill -f "uvicorn" || true
 	-pkill -f "celery" || true
 	-redis-cli shutdown || true
+	-redis-cli FLUSHALL || true
 	sleep 2
 	rm -rf logs/*
 	rm -rf results/*
+	rm -rf cache/*  # Clean embedding cache
 
 redis:
 	redis-server --daemonize yes
 
 dev: clean redis
-	trap 'make clean' EXIT; \
+	ENV=dev trap 'make clean' EXIT; \
 	make run & \
 	make celery
 
