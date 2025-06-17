@@ -270,8 +270,10 @@ poetry run pytest --cov=src
 
 ## Developer's note
 
-I created this repo for the following purposes:
+I participated in many Python backend projects of various size over the last 5 years, but it just so happened that I never set up a *production-grade* repository completely from scratch, with all the appropriate infrastructure, linters, workflows etc. It's usually a gradual team effort - rightfully so - but I wanted to get the full experience, and maybe eventually a nice template for the future projects.
 
-- Get familiar with LLM tools I haven't used at all or only used to a limited extent.
+This project is my playground in:
+- Celery - again, somehow we neveer crossed paths at work;
+- getting more familiar with Python LLM frameworks.
 
-- Create a production-grade mini project with robust infrastructure: CI/CD, lint, tests, documentation. I might later turn it into a template for future projects, extend the functionality, etc.
+The first version simply requests an AI summary of an OpenAPI spec, and I'm currently in the process of adding RAG for ad-hoc queries.
