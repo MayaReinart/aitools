@@ -1,13 +1,12 @@
 """API routes for the application."""
 
-from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Self
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, field_validator
 
 from src.api.exceptions import (
     InvalidFormatError,
@@ -19,8 +18,8 @@ from src.core.health import check_celery_worker, check_redis_connection
 from src.core.models import TaskState
 from src.core.state import state_store
 from src.core.storage import ExportFormat, JobStorage, SpecFormat
-from src.services.llm import get_llm_spec_analysis_with_vector_store
-from src.tasks.pipeline import create_processing_chain
+from src.services.llm import embed_spec
+from src.tasks.pipeline import create_summary_chain, query_spec_task
 from src.tasks.standalone import verify_broker_connection
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -83,8 +82,12 @@ async def upload_spec(file: UploadFile) -> dict[str, str]:
         storage = JobStorage(job_id)
         spec_path = storage.save_spec(spec_content, _detect_format(file.content_type))
 
+        # Save spec embedding
+        index = embed_spec(spec_path)
+        storage.save_spec_embedding(index)
+
         # Create and verify chain
-        chain = create_processing_chain(str(spec_path), job_id)
+        chain = create_summary_chain(str(spec_path), job_id)
         verify_broker_connection(chain)
 
         # Start task and store ID
@@ -240,34 +243,104 @@ async def export_summary(
 class SpecQuery(BaseModel):
     """Query model for spec analysis."""
 
+    QUERY_MAX_LENGTH: ClassVar[int] = 1000
+
     query: str
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls: type[Self], v: str) -> str:
+        if not v.strip() or len(v) > cls.QUERY_MAX_LENGTH:
+            raise ValidationError
+        return v.strip()
 
 
 @router.post("/spec/{job_id}/query")
-async def query_spec(job_id: str, query: SpecQuery) -> JSONResponse:
+async def query_spec(
+    job_id: str,
+    query: SpecQuery,
+) -> JSONResponse:
     """Query the uploaded spec with a natural language question."""
-    storage = JobStorage(job_id)
 
-    # Check if the spec exists
-    spec_path = storage.get_spec_path()
-    if not spec_path:
+    # Check job state
+    state = state_store.get_state(job_id)
+    if not state:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Spec not found",
+            detail="Job not found",
+        )
+    if state.state == TaskState.FAILURE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job failed, cannot query spec",
+        )
+    if state.state != TaskState.SUCCESS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job is not complete, cannot query spec",
         )
 
     try:
-        # Read the spec content
-        with Path(spec_path).open() as f:
-            spec_content = f.read()
+        result = query_spec_task.delay(job_id=job_id, query=query.query)
 
-        # Get response from LLM
-        response = get_llm_spec_analysis_with_vector_store(spec_content, query.query)
+        logger.info(f"[{job_id}] Started query task: {result.id}")
 
-        return JSONResponse(content={"answer": str(response)})
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "job_id": job_id,
+                "status": "processing",
+                "message": "Query is being processed",
+            },
+        )
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error querying spec: {e!s}", exc_info=True)
+        logger.error(f"Error initiating query: {e!s}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process query",
+            detail=f"Failed to process query: {e!s}",
         ) from e
+
+
+@router.get("/spec/{job_id}/query")
+async def get_query_result(job_id: str) -> JSONResponse:
+    """Get the result of a spec query."""
+    # Check if the original job exists
+    if not JobStorage(job_id).get_spec_path():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
+
+    # Get query state
+    state = state_store.get_state(job_id)
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Query not found",
+        )
+
+    if state.state == TaskState.FAILURE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=state.error or "Query failed",
+        )
+
+    if state.state != TaskState.SUCCESS:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": state.state.value,
+                "current_job_name": state.progress[-1].stage
+                if state.progress
+                else None,
+                "current_job_progress": state.progress[-1].progress
+                if state.progress
+                else None,
+            },
+        )
+
+    # Success
+    return JSONResponse(content={"answer": state.result})

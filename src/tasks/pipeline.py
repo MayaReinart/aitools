@@ -16,7 +16,12 @@ from src.core.utils import (
     pydantic_task,
     setup_task_config,
 )
-from src.services.llm import EndpointAnalysis, SpecAnalysis, get_llm_spec_analysis
+from src.services.llm import (
+    EndpointAnalysis,
+    SpecAnalysis,
+    get_llm_spec_analysis,
+    get_llm_spec_analysis_with_vector_store,
+)
 from src.services.models import ParsedEndpoint, ParsedSpec
 from src.services.parser import parse_spec
 
@@ -275,7 +280,7 @@ def generate_outputs_task(
         raise
 
 
-def create_processing_chain(spec_path: str, job_id: str) -> celery_chain:
+def create_summary_chain(spec_path: str, job_id: str) -> celery_chain:
     """Create a chain of tasks for processing an API specification.
 
     Args:
@@ -290,3 +295,58 @@ def create_processing_chain(spec_path: str, job_id: str) -> celery_chain:
         analyze_spec_task.s(),
         generate_outputs_task.s(),
     )
+
+
+@celery_app.task(**setup_task_config())
+@handle_task_errors()
+def query_spec_task(self: Task, job_id: str, query: str) -> str | None:
+    """Query spec using LLM.
+
+    Args:
+        job_id: The job ID
+        query: The query to analyze
+
+    Returns:
+        AnalysisResult: Analysis results with spec info, summary, and endpoints
+    """
+    task_id = self.request.id
+    if not task_id:
+        raise TaskIDError()
+
+    # TODO: we identify the spec by the original job ID, but that's not good.
+    # JobStorage should be renamed to SpecStorage, and decoupled from Celery tasks.
+    storage = JobStorage(job_id)
+    # Get the spec embedding
+    embedding_path = storage.get_spec_embedding_path()
+    if not embedding_path:
+        state_store.set_failure(job_id, "Spec embedding not found")
+        raise TaskError  # TODO: raise a specific error
+
+    try:
+        # Update task ID and ensure state is PROGRESS
+        state_store.set_task_id(job_id, task_id)
+        update_progress(
+            job_id,
+            stage="query",
+            progress=0,
+            message="Starting spec query",
+        )
+    except Exception as e:
+        logger.error(f"[{job_id}] Error in query_spec_task: {e}")
+        state_store.set_failure(job_id, str(e))
+        raise
+
+    try:
+        result = get_llm_spec_analysis_with_vector_store(Path(embedding_path), query)
+        update_progress(
+            job_id,
+            stage="query",
+            progress=100,
+            message="Query complete",
+        )
+    except Exception as e:
+        logger.error(f"[{job_id}] Error in query_spec_task: {e}")
+        state_store.set_failure(job_id, str(e))
+        raise TaskError from e
+    else:
+        return result

@@ -1,9 +1,20 @@
 """OpenAI integration for API analysis."""
 
-from llama_index.core import Document, VectorStoreIndex  # type: ignore
+import hashlib
+import time
+from functools import lru_cache
+from pathlib import Path
+from typing import cast
+
+from llama_index.core import (  # type: ignore
+    Document,
+    StorageContext,
+    VectorStoreIndex,
+    load_index_from_storage,
+)
 from llama_index.core.base.response.schema import Response  # type: ignore
 from loguru import logger
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
@@ -123,7 +134,9 @@ def _get_completion(prompt: str, config: LLMConfig | None = None) -> str:
         raise
 
 
-def get_llm_spec_analysis_with_vector_store(spec: str, query: str) -> Response:
+def get_llm_spec_analysis_with_vector_store(
+    embedding_path: Path, query: str
+) -> str | None:
     """
     Analyze an OpenAPI specification using LLM and vector store.
 
@@ -134,12 +147,80 @@ def get_llm_spec_analysis_with_vector_store(spec: str, query: str) -> Response:
     Returns:
         Response: The LLM response
     """
-    docs = [Document(text=spec)]
 
-    index = VectorStoreIndex.from_documents(docs)
-    engine = index.as_query_engine()
+    # Get the spec embedding
+    index = load_index_from_storage(
+        persist_dir=embedding_path,
+        storage_context=StorageContext.from_defaults(),
+    )
 
-    result = engine.query(query)
+    # Query the spec
+    result = index.as_query_engine().query(query)
     if not isinstance(result, Response):
         raise TypeError(type(result).__name__)
-    return result
+    return result.response
+
+
+@lru_cache(maxsize=100)
+def _get_spec_hash(spec_path: Path) -> str:
+    """Get a hash of the spec file content for caching."""
+    return hashlib.sha256(spec_path.read_bytes()).hexdigest()
+
+
+class EmbeddingCreationError(RuntimeError):
+    """Raised when embedding creation fails after all retries."""
+
+    pass
+
+
+def embed_spec(spec: Path) -> VectorStoreIndex:
+    """
+    Embed an OpenAPI specification using LLM.
+    Uses caching to avoid repeated API calls for the same spec.
+
+    Args:
+        spec: Path to the specification file
+
+    Returns:
+        VectorStoreIndex: The embedding index
+    """
+    # Check if we already have an embedding for this spec
+    storage = StorageContext.from_defaults()
+    cache_dir = Path("cache") / _get_spec_hash(spec)
+
+    if cache_dir.exists():
+        try:
+            index = load_index_from_storage(
+                persist_dir=cache_dir,
+                storage_context=storage,
+            )
+            return cast(VectorStoreIndex, index)
+        except Exception as e:
+            logger.warning(f"Failed to load cached embedding: {e}")
+
+    # Create new embedding if not cached
+    docs = [Document(text=spec.read_text())]
+
+    # Add retry logic for rate limits
+    max_retries = 3
+    base_delay = 1  # Start with 1 second delay
+
+    # TODO: isolate rate limiting logic and add it to other calls
+    for attempt in range(max_retries):
+        try:
+            index = VectorStoreIndex.from_documents(docs)
+            break
+        except RateLimitError:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)  # Exponential backoff
+            logger.warning(f"Rate limit hit, retrying in {delay} seconds...")
+            time.sleep(delay)
+    else:
+        raise EmbeddingCreationError()
+
+    # Cache the embedding
+    cache_dir.parent.mkdir(exist_ok=True)
+    index.storage_context.persist(cache_dir)
+
+    return index

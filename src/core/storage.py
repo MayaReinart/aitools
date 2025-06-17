@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
+from llama_index.core import VectorStoreIndex
 from loguru import logger
 
 from src.core.config import settings
@@ -24,6 +25,7 @@ class JobArtifact(str, Enum):
     EXPORT = "export"
     LOG = "log"
     OUTPUT = "output"
+    SPEC_EMBEDDING = "spec_embedding"
 
 
 class SpecFormat(str, Enum):
@@ -115,6 +117,14 @@ class JobStorage:
         logger.info(f"Saved {self.job_id} parsed spec to {parsed_spec_path}")
         return parsed_spec_path
 
+    def save_spec_embedding(self, index: VectorStoreIndex) -> str:
+        """Save the embedding of the OpenAPI spec."""
+        embedding_path = self.job_dir / "spec_embedding"
+        index.storage_context.persist(embedding_path)
+        self.log_event("Saved spec embedding")
+        logger.info(f"Saved {self.job_id} spec embedding to {embedding_path.name}")
+        return embedding_path.name
+
     def log_event(self, message: str) -> None:
         """Log an event to the execution log file.
 
@@ -148,6 +158,11 @@ class JobStorage:
         """Get the path to the parsed spec file if it exists."""
         path = self.job_dir / "parsed_spec.json"
         return _get_and_log_path(path, self.job_id, JobArtifact.PARSED_SPEC)
+
+    def get_spec_embedding_path(self) -> Path | None:
+        """Get the path to the spec embedding if it exists."""
+        path = self.job_dir / "spec_embedding"
+        return _get_and_log_path(path, self.job_id, JobArtifact.SPEC_EMBEDDING)
 
     def get_log_path(self) -> Path | None:
         """Get the path to the execution log if it exists."""
