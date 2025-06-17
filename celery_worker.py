@@ -21,6 +21,7 @@ from loguru import logger  # type: ignore
 import src.tasks.pipeline  # noqa
 from src.core.celery_app import celery_app
 from src.core.logging import setup_logging
+from src.core.state import state_store
 
 # Export the Celery app instance
 celery = celery_app
@@ -60,10 +61,26 @@ def task_prerun_handler(
 
 
 @task_success.connect
-def task_success_handler(sender: Task | None = None, **_kwargs: dict[str, Any]) -> None:
-    """Log successful task completion."""
+def task_success_handler(
+    sender: Task | None = None,
+    result: dict[str, Any] | None = None,
+    **_kwargs: dict[str, Any],
+) -> None:
+    """Log successful task completion and update state."""
     if sender and sender.request and sender.request.id:
         logger.info(f"Task completed successfully: {sender.name}[{sender.request.id}]")
+
+    # Handle state updates
+    logger.debug(f"Task success handler called with result: {result}")
+    if isinstance(result, dict) and "job_id" in result:
+        job_id = result.pop("job_id")
+        # Only store state if this is the final task (has analysis data)
+        if "analysis" in result:
+            logger.info(f"Storing final result for job {job_id}")
+            logger.debug(f"Setting success state with result: {result}")
+            state_store.set_success(job_id, result)
+        else:
+            logger.debug(f"Skipping state update for job {job_id} - no analysis data")
 
 
 @task_failure.connect
@@ -72,11 +89,13 @@ def task_failure_handler(
     exception: Exception | None = None,
     traceback: TracebackType | None = None,
     sender: Task | None = None,
+    _args: tuple[str, ...] | None = None,
     **_kwargs: dict[str, Any],
 ) -> None:
-    """Log task failure."""
+    """Handle task failure - both logging and state management."""
     if task_id and sender:
-        logger.error(f"Task failed: {sender.name}[{task_id}]")
+        # Log the failure
+        logger.error(f"Task failed: [{task_id}]")
         if exception:
             logger.error(f"Error: {exception}")
         if traceback:

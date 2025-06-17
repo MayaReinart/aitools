@@ -181,6 +181,7 @@ def mock_spec_analysis() -> SpecAnalysis:
                 analysis="Test endpoint analysis",
             )
         ],
+        endpoints_analysis="Test endpoints analysis",
     )
 
 

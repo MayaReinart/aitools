@@ -1,21 +1,25 @@
 """Chain-based API processing pipeline."""
 
-import json
 from pathlib import Path
 from typing import Any
 
 from celery import Task  # type: ignore
 from celery.canvas import chain as celery_chain  # type: ignore
 from loguru import logger
+from pydantic import BaseModel
 
 from src.core.celery_app import celery_app
-from src.core.config import settings
 from src.core.models import TaskState, TaskStatus
 from src.core.state import state_store
 from src.core.storage import JobStorage
-from src.core.utils import handle_task_errors, setup_task_config, temporary_file
+from src.core.utils import (
+    handle_task_errors,
+    pydantic_task,
+    setup_task_config,
+)
 from src.services.llm import EndpointAnalysis, SpecAnalysis, get_llm_spec_analysis
-from src.services.parser import ParsedSpec, parse_spec
+from src.services.models import ParsedEndpoint, ParsedSpec
+from src.services.parser import parse_spec
 
 
 class TaskError(Exception):
@@ -52,43 +56,61 @@ def update_progress(
     state_store.set_state(state)
 
 
+class ParseSpecResult(BaseModel):
+    """Result of parse_spec_task."""
+
+    status: str
+    job_id: str
+    spec: ParsedSpec  # Change from dict[str, Any] to ParsedSpec
+    task_id: str | None = None
+
+
+class AnalysisResult(BaseModel):
+    """Result of analyze_spec_task."""
+
+    analysis: SpecAnalysis
+    endpoints: list[
+        ParsedEndpoint
+    ]  # Change from list[dict[str, Any]] to list[ParsedEndpoint]
+    job_id: str
+    task_id: str
+    previous_task: str | None = None
+
+
+class OutputResult(BaseModel):
+    """Result of generate_outputs_task."""
+
+    outputs: list[str]
+    job_id: str
+    task_id: str
+    previous_task: str | None = None
+    analysis: dict[str, Any] | None = None
+
+
 @celery_app.task(**setup_task_config())
 @handle_task_errors()
-def parse_spec_task(self: Task, job_id: str, spec_path: str) -> dict[str, Any]:
+@pydantic_task(ParseSpecResult)
+def parse_spec_task(self: Task, job_id: str, spec_path: str) -> ParseSpecResult:
     """Parse and analyze an OpenAPI specification.
 
     Args:
         job_id: The job ID
-        spec_path: Path to the specification file or the spec content itself
+        spec_path: Path to the specification file
 
     Returns:
-        dict: Analysis results
+        ParseSpecResult: Analysis results
     """
     logger.info(f"[{job_id}] Starting parse_spec_task with task_id: {self.request.id}")
 
     try:
-        # Check if spec_path is actually a file path or spec content
-        if Path(spec_path).exists():
-            spec = parse_spec(Path(spec_path))
-        else:
-            with temporary_file(spec_path) as temp_path:
-                spec = parse_spec(temp_path)
-
-        # Get LLM analysis
-        analysis = get_llm_spec_analysis(spec)
-
-        # Save results
-        results_path = settings.job_data_path / f"{job_id}_analysis.json"
-        with results_path.open("w") as f:
-            json.dump(analysis.model_dump(), f, indent=2)
-
+        spec = parse_spec(Path(spec_path))
         logger.info(f"[{job_id}] Successfully completed parse_spec_task")
-        return {
-            "status": "success",
-            "job_id": job_id,
-            "spec": spec.model_dump(),
-            "task_id": self.request.id,
-        }
+        return ParseSpecResult(
+            status="success",
+            job_id=job_id,
+            spec=spec,
+            task_id=self.request.id,
+        )
     except Exception as e:
         logger.error(f"[{job_id}] Error in parse_spec_task: {e}")
         state_store.set_failure(job_id, str(e))
@@ -112,19 +134,17 @@ def _raise_task_error(job_id: str, error_msg: str) -> None:
 
 @celery_app.task(**setup_task_config())
 @handle_task_errors()
-def analyze_spec_task(self: Task, parse_result: dict[str, Any]) -> dict[str, Any]:
+@pydantic_task(ParseSpecResult)
+def analyze_spec_task(self: Task, parse_result: ParseSpecResult) -> AnalysisResult:
     """Analyze spec using LLM.
 
     Args:
         parse_result: Results from parse_spec_task
 
     Returns:
-        dict: Analysis results with spec info, summary, and endpoints
+        AnalysisResult: Analysis results with spec info, summary, and endpoints
     """
-    job_id = parse_result.get("job_id")
-    if not job_id:
-        raise TaskIDError()
-
+    job_id = parse_result.job_id
     task_id = self.request.id
     if not task_id:
         raise TaskIDError()
@@ -146,29 +166,25 @@ def analyze_spec_task(self: Task, parse_result: dict[str, Any]) -> dict[str, Any
         raise
 
     try:
-        if parse_result.get("status") == "error":
-            error_msg = parse_result.get("error", "Unknown error in previous task")
+        if parse_result.status == "error":
+            error_msg = "Unknown error in previous task"
             _raise_task_error(job_id, error_msg)
 
-        spec_data = parse_result.get("spec")
-        if not spec_data:
-            _raise_task_error(job_id, "Missing spec data from previous task")
+        parsed_spec: ParsedSpec = parse_result.spec
 
-        # Convert dict back to ParsedSpec
-        parsed_spec = ParsedSpec.model_validate(spec_data)
+        # Create endpoint analyses for each endpoint
+        endpoint_analyses = []
+        for endpoint in parsed_spec.endpoints:
+            analysis = EndpointAnalysis(
+                path=endpoint.path,
+                method=endpoint.method,
+                # Mock analysis for now
+                analysis=f"Analysis for {endpoint.method} {endpoint.path}",
+            )
+            endpoint_analyses.append(analysis)
 
-        # Mock analysis for now
-        mock_analysis = SpecAnalysis(
-            overview="API Overview",
-            endpoints=[
-                EndpointAnalysis(
-                    path=endpoint.path,
-                    method=endpoint.method,
-                    analysis=f"Analysis for {endpoint.method} {endpoint.path}",
-                )
-                for endpoint in parsed_spec.endpoints
-            ],
-        )
+        # Create the spec analysis
+        spec_analysis = get_llm_spec_analysis(parsed_spec)
 
         update_progress(
             job_id,
@@ -177,13 +193,13 @@ def analyze_spec_task(self: Task, parse_result: dict[str, Any]) -> dict[str, Any
             message="Analysis complete",
         )
 
-        return {
-            "analysis": mock_analysis.model_dump(),
-            "endpoints": [endpoint.model_dump() for endpoint in parsed_spec.endpoints],
-            "job_id": job_id,
-            "task_id": task_id,
-            "previous_task": parse_result.get("task_id"),
-        }
+        return AnalysisResult(
+            analysis=spec_analysis,
+            endpoints=parsed_spec.endpoints,
+            job_id=job_id,
+            task_id=task_id,
+            previous_task=parse_result.task_id,
+        )
 
     except Exception as e:
         logger.error(f"[{job_id}] Error in analyze_spec_task: {e}")
@@ -193,22 +209,20 @@ def analyze_spec_task(self: Task, parse_result: dict[str, Any]) -> dict[str, Any
 
 @celery_app.task(**setup_task_config())
 @handle_task_errors()
+@pydantic_task(AnalysisResult)
 def generate_outputs_task(
     self: Task,
-    analysis_result: dict[str, Any],
-) -> dict[str, Any]:
+    analysis_result: AnalysisResult,
+) -> OutputResult:
     """Generate output files from analysis.
 
     Args:
         analysis_result: Results from analyze_spec_task
 
     Returns:
-        dict: Generated output files and metadata
+        OutputResult: Generated output files and metadata
     """
-    job_id = analysis_result.get("job_id")
-    if not job_id:
-        raise TaskIDError()
-
+    job_id = analysis_result.job_id
     task_id = self.request.id
     if not task_id:
         raise TaskIDError()
@@ -232,10 +246,11 @@ def generate_outputs_task(
     try:
         storage = JobStorage(job_id)
 
-        # Generate mock outputs for now
+        spec_analysis: SpecAnalysis = analysis_result.analysis
+
         outputs = {
-            "overview.md": "# API Overview\n\nThis is a mock overview.",
-            "endpoints.md": "# Endpoints\n\nThis is a mock endpoints document.",
+            "overview.md": spec_analysis.overview,
+            "endpoints.md": spec_analysis.endpoints_analysis,
         }
 
         # Save outputs
@@ -249,30 +264,48 @@ def generate_outputs_task(
             message="Output generation complete",
         )
 
-        return {
-            "outputs": list(outputs.keys()),
-            "job_id": job_id,
-            "task_id": task_id,
-            "previous_task": analysis_result.get("task_id"),
-        }
+        # Return result that will be handled by the signal handler
+        return OutputResult(
+            outputs=list(outputs.keys()),
+            job_id=job_id,
+            task_id=task_id,
+            previous_task=analysis_result.previous_task,
+            analysis={
+                "spec_info": {
+                    "title": spec_analysis.overview.split(" for ")[-1],
+                    "description": spec_analysis.overview,
+                },
+                "summary": {
+                    "overview": spec_analysis.overview,
+                },
+                "endpoints": [
+                    {
+                        "path": endpoint.path,
+                        "method": endpoint.method,
+                        "analysis": endpoint.analysis,
+                    }
+                    for endpoint in spec_analysis.endpoints
+                ],
+            },
+        )
     except Exception as e:
         logger.error(f"[{job_id}] Error in generate_outputs_task: {e}")
         state_store.set_failure(job_id, str(e))
         raise
 
 
-def create_processing_chain(content: str, job_id: str) -> celery_chain:
+def create_processing_chain(spec_path: str, job_id: str) -> celery_chain:
     """Create a chain of tasks for processing an API specification.
 
     Args:
-        content: The specification content
+        spec_path: Path to the saved specification file
         job_id: The job ID
 
     Returns:
         A chain of tasks to process the specification
     """
     return celery_chain(
-        parse_spec_task.s(job_id=job_id, spec_path=content),
+        parse_spec_task.s(job_id=job_id, spec_path=spec_path),
         analyze_spec_task.s(),
         generate_outputs_task.s(),
     )

@@ -1,6 +1,7 @@
 """Common utility functions and patterns."""
 
 import contextlib
+import uuid
 from collections.abc import Callable, Generator
 from functools import wraps
 from pathlib import Path
@@ -66,7 +67,7 @@ def temporary_file(content: str, suffix: str = ".yaml") -> Generator[Path, None,
     """
     temp_dir = Path(settings.job_data_path) / "temp"
     temp_dir.mkdir(exist_ok=True)
-    temp_path = temp_dir / f"temp_{hash(content)}{suffix}"
+    temp_path = temp_dir / f"{uuid.uuid4().hex[:8]}{suffix}"
 
     try:
         temp_path.write_text(content)
@@ -95,15 +96,21 @@ def pydantic_task(
     """Decorator to (de)serialize Pydantic models for Celery tasks."""
 
     def decorator(fn: Callable[..., object]) -> Callable[..., object]:
+        @wraps(fn)
         def wrapper(self: object, *args: object, **kwargs: object) -> object:
-            # Deserialize first arg if it's a dict and model_cls is provided
-            if args and isinstance(args[0], dict):
-                args = (model_cls.model_validate(args[0]),) + args[1:]
-            result = fn(self, *args, **kwargs)
-            # Serialize output if it's a model
-            if isinstance(result, BaseModel):
-                return result.model_dump()
-            return result
+            try:
+                # Deserialize first arg if it's a dict and model_cls is provided
+                if args and isinstance(args[0], dict):
+                    args = (model_cls.model_validate(args[0]),) + args[1:]
+                result = fn(self, *args, **kwargs)
+            except Exception as e:
+                logger.error(f"Error in {fn.__name__}: {e!s}")
+                raise
+            else:
+                # Serialize output if it's a model
+                if isinstance(result, BaseModel):
+                    return result.model_dump()
+                return result
 
         return wrapper
 

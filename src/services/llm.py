@@ -12,7 +12,10 @@ from pydantic import BaseModel
 
 from src.core.config import settings
 from src.services.parser import ParsedSpec
-from src.services.prompts import create_endpoint_prompt, create_overview_prompt
+from src.services.prompts import (
+    create_batched_endpoint_prompt,
+    create_overview_prompt,
+)
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -22,13 +25,14 @@ class EndpointAnalysis(BaseModel):
 
     path: str
     method: str
-    analysis: str
+    analysis: str | None = None
 
 
 class SpecAnalysis(BaseModel):
     """Analysis of an OpenAPI specification."""
 
     overview: str
+    endpoints_analysis: str
     endpoints: list[EndpointAnalysis]
 
 
@@ -48,31 +52,36 @@ def get_llm_spec_analysis(
 
     Args:
         spec: The parsed OpenAPI specification
+        config: The configuration for the LLM
 
     Returns:
-        dict: Analysis results including overview and endpoint details
+        SpecAnalysis: The analysis results
     """
     # Generate API overview
     logger.info("Generating API overview")
     overview_prompt = create_overview_prompt(spec)
-    overview = _get_completion(overview_prompt, config)
+    overview = _get_completion(overview_prompt, config)  # type: ignore
 
     # Analyze each endpoint
     logger.info("Analyzing endpoints")
-    endpoint_analyses: list[EndpointAnalysis] = []
+    endpoint_info: list[EndpointAnalysis] = []
     for endpoint in spec.endpoints:
         logger.info(f"Analyzing endpoint: {endpoint.method} {endpoint.path}")
-        endpoint_prompt = create_endpoint_prompt(endpoint)
-        endpoint_analysis = _get_completion(endpoint_prompt, config)
-        endpoint_analyses.append(
+        endpoint_info.append(
             EndpointAnalysis(
                 path=endpoint.path,
                 method=endpoint.method,
-                analysis=endpoint_analysis,
             )
         )
 
-    return SpecAnalysis(overview=overview, endpoints=endpoint_analyses)
+    endpoints_prompt = create_batched_endpoint_prompt(spec.endpoints)
+    endpoints_analysis = _get_completion(endpoints_prompt, config)  # type: ignore
+
+    return SpecAnalysis(
+        overview=overview,
+        endpoints_analysis=endpoints_analysis,
+        endpoints=endpoint_info,
+    )
 
 
 def _get_completion(prompt: str, config: LLMConfig | None = None) -> str:

@@ -35,19 +35,28 @@ class StateStore:
         """Get the current state of a job."""
         try:
             key = self._get_key(job_id)
+            logger.debug(f"Getting state for job {job_id} with key {key}")
             data = self.redis.get(key)
             if not data:
+                logger.debug(f"No state found for job {job_id}")
                 return None
-            return TaskStatus.model_validate_json(data)
+            state = TaskStatus.model_validate_json(data)
         except (RedisError, ValidationError) as e:
             logger.error(f"Error getting state for job {job_id}: {e}")
             return None
+        else:
+            logger.debug(f"Retrieved state for job {job_id}: {state.model_dump()}")
+            return state
 
     def set_state(self, state: TaskStatus) -> None:
         """Set the state for a job."""
         try:
             key = self._get_key(state.job_id)
-            self.redis.setex(key, self.TASK_STATE_TTL, state.model_dump_json())
+            logger.debug(f"Setting state for job {state.job_id} with key {key}")
+            state_json = state.model_dump_json()
+            logger.debug(f"State JSON: {state_json}")
+            self.redis.setex(key, self.TASK_STATE_TTL, state_json)
+            logger.debug(f"State set successfully for job {state.job_id}")
         except RedisError as e:
             logger.error(f"Error setting state for job {state.job_id}: {e}")
 
@@ -75,6 +84,7 @@ class StateStore:
 
     def set_success(self, job_id: str, result: dict[str, Any]) -> None:
         """Set a job as successful."""
+        logger.debug(f"Setting success state for job {job_id}")
         state = self.get_state(job_id)
         if not state:
             state = TaskStatus(
@@ -86,7 +96,13 @@ class StateStore:
             state.state = TaskState.SUCCESS
             state.result = result
             state.updated_at = _utc_now()
+        logger.debug(f"Success state before save: {state.model_dump()}")
         self.set_state(state)
+
+        state = self.get_state(job_id)
+        logger.debug(
+            f"Success state after save: {state.model_dump() if state else None}"
+        )
 
     def set_failure(self, job_id: str, error: str) -> None:
         """Set a job as failed."""

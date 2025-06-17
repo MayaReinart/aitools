@@ -23,10 +23,11 @@ class JobArtifact(str, Enum):
     SUMMARY = "summary"
     EXPORT = "export"
     LOG = "log"
+    OUTPUT = "output"
 
 
 class SpecFormat(str, Enum):
-    """Formats for uploaded specs."""
+    """Formats for API specifications."""
 
     YAML = "yaml"
     JSON = "json"
@@ -58,7 +59,6 @@ class JobStorage:
         Args:
             job_id: Unique identifier for the job
         """
-
         self.job_id = job_id
         self.job_dir = JOB_DATA_ROOT / job_id
 
@@ -68,7 +68,7 @@ class JobStorage:
         self.job_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
 
         # Initialize log file
-        self.log_file = self.job_dir / "execution.log"
+        self.log_file = self.job_dir / "log.txt"
         if not self.log_file.exists():
             self.log_file.touch(mode=0o644)
 

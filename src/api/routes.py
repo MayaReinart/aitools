@@ -79,12 +79,12 @@ async def upload_spec(file: UploadFile) -> dict[str, str]:
         spec_content = content.decode("utf-8")
         job_id = str(uuid4())
 
-        # Save spec
+        # Save spec and get path
         storage = JobStorage(job_id)
-        storage.save_spec(spec_content, _detect_format(file.content_type))
+        spec_path = storage.save_spec(spec_content, _detect_format(file.content_type))
 
         # Create and verify chain
-        chain = create_processing_chain(spec_content, job_id)
+        chain = create_processing_chain(str(spec_path), job_id)
         verify_broker_connection(chain)
 
         # Start task and store ID
@@ -117,7 +117,7 @@ async def get_summary(job_id: str) -> JSONResponse:
     # Check task state first
     state = state_store.get_state(job_id)
 
-    logger.debug(f"[{job_id}] State: {state}")
+    logger.debug(f"[{job_id}] State: {state.model_dump() if state else None}")
 
     if not state:
         raise HTTPException(
@@ -140,6 +140,7 @@ async def get_summary(job_id: str) -> JSONResponse:
 
     # Return state from our store
     if state.state != TaskState.SUCCESS:
+        logger.debug(f"[{job_id}] Returning 202 - State is {state.state}")
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
             content=response.model_dump(),
@@ -152,6 +153,7 @@ async def get_summary(job_id: str) -> JSONResponse:
         storage.save_summary(state.result)
 
     response.result = state.result
+    logger.debug(f"[{job_id}] Returning 200 - State is {state.state}")
     return JSONResponse(content=response.model_dump())
 
 

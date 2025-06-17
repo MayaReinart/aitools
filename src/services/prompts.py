@@ -53,6 +53,29 @@ Provide:
 Keep the description technical and focused on usage."""
 
 
+def create_batched_endpoint_prompt(endpoints: list[ParsedEndpoint]) -> str:
+    """Create a prompt for batched endpoint analysis.
+
+    Args:
+        endpoints: List of parsed endpoints
+
+    Returns:
+        Formatted prompt for batched endpoint analysis
+    """
+    return f"""Analyze these API endpoints and provide detailed documentation.
+
+{_format_endpoints(endpoints)}
+
+Provide:
+1. Purpose and functionality
+2. Request/response patterns
+3. Error handling
+4. Security considerations
+5. Integration examples
+
+Keep the description technical and focused on usage."""
+
+
 def _format_endpoints(endpoints: list[ParsedEndpoint]) -> str:
     """Format a list of endpoints for prompt inclusion.
 
