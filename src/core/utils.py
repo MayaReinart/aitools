@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from celery import Task
 from loguru import logger
+from pydantic import BaseModel
 
 from src.core.config import settings
 
@@ -86,3 +87,24 @@ def setup_task_config() -> dict[str, Any]:
     if settings.ENV.lower() != "dev":
         config["max_retries"] = 3
     return config
+
+
+def pydantic_task(
+    model_cls: type[BaseModel],
+) -> Callable[[Callable[..., object]], Callable[..., object]]:
+    """Decorator to (de)serialize Pydantic models for Celery tasks."""
+
+    def decorator(fn: Callable[..., object]) -> Callable[..., object]:
+        def wrapper(self: object, *args: object, **kwargs: object) -> object:
+            # Deserialize first arg if it's a dict and model_cls is provided
+            if args and isinstance(args[0], dict):
+                args = (model_cls.model_validate(args[0]),) + args[1:]
+            result = fn(self, *args, **kwargs)
+            # Serialize output if it's a model
+            if isinstance(result, BaseModel):
+                return result.model_dump()
+            return result
+
+        return wrapper
+
+    return decorator
